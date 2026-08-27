@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Claude Usage</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #2d2d2d;
+        --field: #3d3d3d;
+        --edge: #4a4a4a;
+        --text: #d8d8d8;
+        --muted: #969696;
+        --accent: #77f;
+        --green: #4ade80;
+        --amber: #fbbf24;
+        --red: #f87171;
+      }
+
+      body {
+        margin: 0;
+        padding: 12px 14px 18px;
+        background: var(--bg);
+        color: var(--text);
+        font: 9pt/1.5 'Segoe UI', -apple-system, sans-serif;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 26px;
+        margin-bottom: 6px;
+      }
+
+      .row > label:first-child {
+        flex: 0 0 96px;
+        text-align: right;
+        color: var(--muted);
+        font-size: 9pt;
+      }
+
+      .row > .control {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+
+      input[type='text'],
+      input[type='number'],
+      select {
+        width: 100%;
+        box-sizing: border-box;
+        background: var(--field);
+        color: var(--text);
+        border: 1px solid var(--edge);
+        border-radius: 3px;
+        padding: 4px 6px;
+        font: inherit;
+      }
+
+      .pair {
+        display: flex;
+        gap: 6px;
+      }
+
+      .hint {
+        margin: -2px 0 10px 104px;
+        color: var(--muted);
+        font-size: 8pt;
+      }
+
+      details {
+        margin: 10px 0 4px;
+        border-top: 1px solid var(--edge);
+        padding-top: 8px;
+      }
+
+      summary {
+        cursor: pointer;
+        color: var(--muted);
+        list-style: none;
+        user-select: none;
+      }
+
+      summary::before {
+        content: '\25B8';
+        display: inline-block;
+        width: 12px;
+        transition: transform 0.1s;
+      }
+
+      details[open] summary::before {
+        transform: rotate(90deg);
+      }
+
+      .status {
+        margin-top: 12px;
+        border-top: 1px solid var(--edge);
+        padding-top: 10px;
+      }
+
+      .status-line {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--muted);
+        flex: 0 0 auto;
+      }
+
+      .dot.ok {
+        background: var(--green);
+      }
+      .dot.warn {
+        background: var(--amber);
+      }
+      .dot.bad {
+        background: var(--red);
+      }
+
+      #statusText {
+        flex: 1 1 auto;
+      }
+
+      button {
+        background: var(--field);
+        color: var(--text);
+        border: 1px solid var(--edge);
+        border-radius: 3px;
+        padding: 3px 10px;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #4a4a4a;
+      }
+
+      #windows {
+        margin: 8px 0 0;
+        padding: 0;
+        list-style: none;
+        font-size: 8pt;
+      }
+
+      #windows li {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 0;
+        border-bottom: 1px solid #383838;
+      }
+
+      #windows .name {
+        flex: 0 0 28px;
+        color: var(--muted);
+      }
+
+      #windows .pct {
+        flex: 0 0 42px;
+      }
+
+      #windows .resets {
+        flex: 1 1 auto;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-align: right;
+      }
+
+      .detail {
+        color: var(--muted);
+        font-size: 8pt;
+        margin-top: 4px;
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="row">
+      <label for="interval">Refresh</label>
+      <div class="control">
+        <select id="interval">
+          <option value="60">Every minute</option>
+          <option value="120">Every 2 minutes</option>
+          <option value="300">Every 5 minutes</option>
+          <option value="600">Every 10 minutes</option>
+          <option value="1800">Every 30 minutes</option>
+        </select>
+      </div>
+    </div>
+    <div class="hint">A minute is the floor: Claude throttles this endpoint hard.</div>
+
+    <div id="windowRows">
+      <div class="row">
+        <label for="window">Window</label>
+        <div class="control">
+          <select id="window">
+            <option value="session">5-hour session</option>
+            <option value="weekly">Weekly</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <label for="resetInfo">Show reset</label>
+        <div class="control">
+          <select id="resetInfo">
+            <option value="dateTime">As a date</option>
+            <option value="countdown">As a countdown</option>
+            <option value="both">Both</option>
+            <option value="none">Not at all</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="dateFormatRow" class="row">
+        <label for="dateFormat">Date as</label>
+        <div class="control">
+          <select id="dateFormat">
+            <option value="dayMonth">31 May, 14:06</option>
+            <option value="isoShort">05/31 14:06</option>
+            <option value="weekday">Sat 14:06</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <label for="warning">Colours at</label>
+      <div class="control pair">
+        <input id="warning" type="number" min="0" max="100" step="1" />
+        <input id="critical" type="number" min="0" max="100" step="1" />
+      </div>
+    </div>
+    <div class="hint">Yellow from the first, orange from the second. Red at 100%.</div>
+
+    <div class="row">
+      <label for="background">Background</label>
+      <div class="control">
+        <select id="background">
+          <option value="transparent">Transparent</option>
+          <option value="blue">Blue</option>
+          <option value="gray">Gray</option>
+        </select>
+      </div>
+    </div>
+
+    <details id="advanced">
+      <summary>Where the credentials are</summary>
+      <div class="row" style="margin-top: 8px">
+        <label for="credentialsPath">File</label>
+        <div class="control">
+          <input id="credentialsPath" type="text" placeholder="Auto-detect" />
+        </div>
+      </div>
+      <div class="hint">
+        Leave blank. Claude Code's own login is read from ~/.claude/.credentials.json, or from the
+        login Keychain on macOS. Naming a file here turns that off.
+      </div>
+    </details>
+
+    <div class="status">
+      <div class="status-line">
+        <span id="statusDot" class="dot"></span>
+        <span id="statusText">Waiting for the first reading…</span>
+        <button id="refresh" type="button">Refresh</button>
+      </div>
+      <div id="statusDetail" class="detail" hidden></div>
+      <ul id="windows"></ul>
+    </div>
+
+    <script>
+      let socket = null;
+      let context = '';
+      let action = '';
+      let settings = {};
+
+      const el = (id) => document.getElementById(id);
+
+      const FIELDS = {
+        interval: { node: 'interval', kind: 'number' },
+        window: { node: 'window', kind: 'text' },
+        resetInfo: { node: 'resetInfo', kind: 'text' },
+        dateFormat: { node: 'dateFormat', kind: 'text' },
+        warning: { node: 'warning', kind: 'number' },
+        critical: { node: 'critical', kind: 'number' },
+        background: { node: 'background', kind: 'text' },
+        credentialsPath: { node: 'credentialsPath', kind: 'text' },
+      };
+
+      const DEFAULTS = {
+        interval: 120,
+        window: 'session',
+        resetInfo: 'dateTime',
+        dateFormat: 'dayMonth',
+        warning: 70,
+        critical: 90,
+        background: 'transparent',
+        credentialsPath: '',
+      };
+
+      function hydrate() {
+        for (const [key, field] of Object.entries(FIELDS)) {
+          const node = el(field.node);
+          const value = settings[key] !== undefined ? settings[key] : DEFAULTS[key];
+          node.value = String(value);
+        }
+        syncVisibility();
+      }
+
+      function collect() {
+        const next = {};
+        for (const [key, field] of Object.entries(FIELDS)) {
+          const node = el(field.node);
+          next[key] = field.kind === 'number' ? Number(node.value) : node.value;
+        }
+        return next;
+      }
+
+      const WINDOW_ACTION = 'com.claudify.agents.usage-window';
+
+      function syncVisibility() {
+        // The two-window key shows both limits at once: it has no window to
+        // pick and no room for a reset time.
+        const single = action === WINDOW_ACTION;
+        el('windowRows').hidden = !single;
+        el('dateFormatRow').hidden = !single || el('resetInfo').value === 'countdown' || el('resetInfo').value === 'none';
+      }
+
+      function save() {
+        settings = collect();
+        syncVisibility();
+        if (socket && socket.readyState === 1) {
+          socket.send(JSON.stringify({ event: 'setSettings', context, payload: settings }));
+        }
+      }
+
+      const TROUBLE = {
+        auth: 'Log in with Claude Code, then press Refresh.',
+        rateLimited: 'Claude is throttling the usage endpoint. It clears on its own.',
+        error: 'Could not reach the usage endpoint.',
+      };
+
+      function percent(window) {
+        return window && window.usedPercent !== null && window.usedPercent !== undefined
+          ? window.usedPercent + '%'
+          : '--';
+      }
+
+      function resets(window) {
+        if (!window || !window.resetAt) return '';
+        const at = new Date(window.resetAt);
+        return Number.isNaN(at.getTime()) ? '' : 'resets ' + at.toLocaleString();
+      }
+
+      function describe(status) {
+        const dot = el('statusDot');
+        const text = el('statusText');
+        const detail = el('statusDetail');
+        const list = el('windows');
+
+        list.innerHTML = '';
+
+        if (TROUBLE[status.status]) {
+          dot.className = 'dot bad';
+          text.textContent =
+            status.status === 'auth'
+              ? 'Not logged in'
+              : status.status === 'rateLimited'
+                ? 'Rate limited'
+                : 'Could not read your usage';
+          detail.textContent = status.error || TROUBLE[status.status];
+          detail.hidden = false;
+          return;
+        }
+
+        const worst = Math.max(
+          status.session && status.session.usedPercent !== null ? status.session.usedPercent : 0,
+          status.weekly && status.weekly.usedPercent !== null ? status.weekly.usedPercent : 0,
+        );
+        dot.className = 'dot ' + (worst >= 90 ? 'bad' : worst >= 70 ? 'warn' : 'ok');
+        text.textContent = status.stale ? 'Last known reading' : 'Up to date';
+
+        detail.textContent = status.stale && status.staleReason === 'rateLimited'
+          ? 'A refresh was skipped: Claude is throttling. The numbers below still stand.'
+          : '';
+        detail.hidden = !detail.textContent;
+
+        for (const [name, window] of [['5H', status.session], ['7D', status.weekly]]) {
+          const item = document.createElement('li');
+          const label = document.createElement('span');
+          label.className = 'name';
+          label.textContent = name;
+          const value = document.createElement('span');
+          value.className = 'pct';
+          value.textContent = percent(window);
+          const when = document.createElement('span');
+          when.className = 'resets';
+          when.textContent = resets(window);
+          item.append(label, value, when);
+          list.append(item);
+        }
+      }
+
+      for (const field of Object.values(FIELDS)) {
+        const node = el(field.node);
+        node.addEventListener('change', save);
+        if (node.tagName === 'INPUT' && node.type === 'text') node.addEventListener('blur', save);
+      }
+
+      el('refresh').addEventListener('click', () => {
+        if (socket && socket.readyState === 1) {
+          socket.send(
+            JSON.stringify({ event: 'sendToPlugin', context, action, payload: { command: 'refresh' } }),
+          );
+        }
+      });
+
+      // eslint-disable-next-line no-unused-vars
+      function connectElgatoStreamDeckSocket(port, propertyInspectorUUID, registerEvent, info, actionInfo) {
+        context = propertyInspectorUUID;
+
+        let parsed = {};
+        try {
+          parsed = JSON.parse(actionInfo);
+        } catch (err) {
+          parsed = {};
+        }
+        action = parsed.action || 'com.claudify.agents.usage';
+        settings = (parsed.payload && parsed.payload.settings) || {};
+        hydrate();
+
+        socket = new WebSocket('ws://127.0.0.1:' + port);
+        socket.onopen = () => {
+          socket.send(JSON.stringify({ event: registerEvent, uuid: context }));
+        };
+        socket.onmessage = (message) => {
+          let event;
+          try {
+            event = JSON.parse(message.data);
+          } catch (err) {
+            return;
+          }
+          if (event.event === 'didReceiveSettings') {
+            settings = (event.payload && event.payload.settings) || {};
+            hydrate();
+          } else if (event.event === 'sendToPropertyInspector' && event.payload) {
+            if (event.payload.event === 'usage') describe(event.payload);
+          }
+        };
+      }
+    </script>
+  </body>
+</html>

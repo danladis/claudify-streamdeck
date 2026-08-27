@@ -4,7 +4,7 @@
     "Name": "Claude Agent Status",
     "Version": "1.0.0.0",
     "Author": "danladis",
-    "Description": "Live count of your running Claude Code agents on a key: a ring that spins while they work and turns amber when one needs you, plus Clawd wiggling along.",
+    "Description": "Live count of your running Claude Code agents on a key: a ring that spins while they work and turns amber when one needs you, plus Clawd wiggling along -- and how much of your Claude usage limits is left.",
     "Category": "Claude Agents",
     "CategoryIcon": "imgs/plugin/category",
     "Icon": "imgs/plugin/marketplace",
@@ -56,6 +56,40 @@
             "States": [
                 {
                     "Image": "imgs/actions/mascot/key",
+                    "TitleAlignment": "middle",
+                    "ShowTitle": false
+                }
+            ]
+        },
+        {
+            "UUID": "com.claudify.agents.usage",
+            "Name": "Usage Limits",
+            "Icon": "imgs/actions/usage/icon",
+            "Tooltip": "How much of your Claude 5-hour and weekly limits is spent.",
+            "PropertyInspectorPath": "ui/usage.html",
+            "Controllers": [
+                "Keypad"
+            ],
+            "States": [
+                {
+                    "Image": "imgs/actions/usage/key",
+                    "TitleAlignment": "middle",
+                    "ShowTitle": false
+                }
+            ]
+        },
+        {
+            "UUID": "com.claudify.agents.usage-window",
+            "Name": "Usage (one window)",
+            "Icon": "imgs/actions/usage-window/icon",
+            "Tooltip": "One Claude limit window, large, with the time it resets.",
+            "PropertyInspectorPath": "ui/usage.html",
+            "Controllers": [
+                "Keypad"
+            ],
+            "States": [
+                {
+                    "Image": "imgs/actions/usage-window/key",
                     "TitleAlignment": "middle",
                     "ShowTitle": false
                 }

@@ -191,6 +191,8 @@ if (IS_MAIN) {
   const LIB = join(ROOT, 'com.claudify.agents.sdPlugin', 'bin', 'lib');
   const { renderKey, viewFor } = await import(join(LIB, 'render.js'));
   const { renderClawd, CLAWD_BODY } = await import(join(LIB, 'clawd.js'));
+  const { renderBars } = await import(join(LIB, 'usage', 'bars.js'));
+  const { renderGauge } = await import(join(LIB, 'usage', 'gauge.js'));
 
   // The viewBox stays 144; only the declared size changes, so it scales cleanly.
   const atSize = (svg, size) =>
@@ -200,11 +202,28 @@ if (IS_MAIN) {
   const ring = renderKey(viewFor(idle), 0, { thickness: 'normal', showMark: true });
   const clawd = renderClawd({ pose: 'default', offset: 0, x: 0 }, { body: CLAWD_BODY });
 
+  // A plausible reading rather than an empty one, so the two usage actions look
+  // like themselves in the list. No reset line: the icons are committed to the
+  // repo, and a formatted date would rewrite them on every run.
+  const sample = {
+    session: { usedPercent: 42, resetAt: null },
+    weekly: { usedPercent: 68, resetAt: null },
+    status: 'ok',
+    updatedAt: '',
+    stale: false,
+  };
+  const bars = renderBars(sample);
+  const gauge = renderGauge(sample, { window: 'session', resetInfo: 'none' });
+
   const SVGS = [
     ['actions/count/key.svg', ring],
     ['actions/count/icon.svg', atSize(ring, 40)],
     ['actions/mascot/key.svg', clawd],
     ['actions/mascot/icon.svg', atSize(clawd, 40)],
+    ['actions/usage/key.svg', bars],
+    ['actions/usage/icon.svg', atSize(bars, 40)],
+    ['actions/usage-window/key.svg', gauge],
+    ['actions/usage-window/icon.svg', atSize(gauge, 40)],
   ];
 
   for (const [name, svg] of SVGS) {

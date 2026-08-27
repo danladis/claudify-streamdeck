@@ -5,6 +5,10 @@ import { summarize, errorHint } from './lib/classify.js';
 import { ringFrames, spinFrameMs } from './lib/render.js';
 import { clawdFrames, clawdFrameMs, pickRandomMove } from './lib/clawd.js';
 import { agentViewCommand, focusTerminal, openInTerminal, runDetached } from './lib/launch.js';
+import { barsFrames } from './lib/usage/bars.js';
+import { gaugeFrames } from './lib/usage/gauge.js';
+import { getUsage } from './lib/usage/provider.js';
+import { normalize as normalizeUsage, thresholdsFor } from './lib/usage/settings.js';
 
 /**
  * The two keys differ only in what they draw: both poll the same way, classify
@@ -16,6 +20,17 @@ const FACES = {
 };
 
 const DEFAULT_ACTION = 'com.claudify.agents.count';
+
+/**
+ * The usage keys are a different animal: they read Claude's own rate-limit
+ * endpoint rather than probing for sessions, so they get their own key class.
+ * Both faces are still just frames, which is why the drawing side looks the
+ * same as above.
+ */
+const USAGE_FACES = {
+  'com.claudify.agents.usage': barsFrames,
+  'com.claudify.agents.usage-window': gaugeFrames,
+};
 
 /** Stream Deck passes its handshake as `-flag value` pairs. */
 function parseLaunchArgs(argv) {
@@ -256,11 +271,122 @@ class AgentKey {
   }
 }
 
+/**
+ * One usage key: how much of a Claude rate-limit window is spent.
+ *
+ * Unlike an agent key there is nothing local to probe -- the numbers come from
+ * Claude's own usage endpoint, behind a cache that every usage key shares. The
+ * cache, not this class, decides whether a tick costs a request.
+ */
+class UsageKey {
+  #timer = null;
+  #destroyed = false;
+  #generation = 0;
+
+  constructor(context, action, rawSettings) {
+    this.context = context;
+    this.action = action;
+    this.frames = USAGE_FACES[action] ?? barsFrames;
+    this.settings = normalizeUsage(rawSettings);
+    this.snapshot = null;
+    this.refresh();
+  }
+
+  applySettings(rawSettings) {
+    const next = normalizeUsage(rawSettings);
+    const changed = JSON.stringify(next) !== JSON.stringify(this.settings);
+    this.settings = next;
+    // Even an unchanged tick has to redraw here: the thresholds, the window and
+    // the date format all live in the face, not in the reading.
+    if (changed) this.refresh();
+  }
+
+  destroy() {
+    this.#destroyed = true;
+    this.#generation += 1;
+    clearTimeout(this.#timer);
+    this.#timer = null;
+  }
+
+  /**
+   * How long until the next redraw. Never longer than a minute when a countdown
+   * is on screen, so 'in 3h 12m' does not sit there being wrong -- redrawing is
+   * free, and the cache keeps the extra ticks off the network.
+   */
+  #tickMs() {
+    const showsCountdown =
+      this.action === 'com.claudify.agents.usage-window' &&
+      (this.settings.resetInfo === 'countdown' || this.settings.resetInfo === 'both');
+    const seconds = showsCountdown ? Math.min(this.settings.interval, 60) : this.settings.interval;
+    return seconds * 1000;
+  }
+
+  #schedule() {
+    if (this.#destroyed) return;
+    clearTimeout(this.#timer);
+    this.#timer = setTimeout(() => this.refresh(), this.#tickMs());
+    // A pending refresh should never be the reason the process stays alive.
+    this.#timer.unref?.();
+  }
+
+  async refresh({ force = false } = {}) {
+    if (this.#destroyed) return;
+    clearTimeout(this.#timer);
+
+    this.#generation += 1;
+    const generation = this.#generation;
+    const settings = this.settings;
+
+    const snapshot = await getUsage({
+      credentialsPath: settings.credentialsPath || undefined,
+      thresholds: thresholdsFor(settings),
+      ttlMs: settings.interval * 1000,
+      force,
+      log: (message) => sd.log(message),
+    });
+    if (this.#destroyed || generation !== this.#generation) return;
+
+    this.snapshot = snapshot;
+    sd.log(`[claude-usage] status=${snapshot.status} stale=${snapshot.stale}`);
+    this.render();
+    this.pushToInspector();
+    this.#schedule();
+  }
+
+  render() {
+    if (!this.snapshot) return;
+    sd.setImage(this.context, this.frames(this.snapshot, this.settings)[0]);
+  }
+
+  pushToInspector() {
+    const snapshot = this.snapshot;
+    if (!snapshot) return;
+
+    sd.sendToPropertyInspector(this.context, this.action, {
+      event: 'usage',
+      status: snapshot.status,
+      stale: snapshot.stale,
+      staleReason: snapshot.staleReason ?? '',
+      session: snapshot.session,
+      weekly: snapshot.weekly,
+      updatedAt: snapshot.updatedAt,
+      // Already sanitised: see the invariant in usage/errors.js.
+      error: snapshot.errorMessage ?? '',
+    });
+  }
+
+  /** A press is the one thing allowed to skip the cache's TTL. */
+  press() {
+    this.refresh({ force: true });
+  }
+}
+
 const keys = new Map();
 
 sd.on('willAppear', ({ context, action, payload }) => {
   keys.get(context)?.destroy();
-  keys.set(context, new AgentKey(context, action, payload?.settings));
+  const Key = USAGE_FACES[action] ? UsageKey : AgentKey;
+  keys.set(context, new Key(context, action, payload?.settings));
 });
 
 sd.on('willDisappear', ({ context }) => {
@@ -287,7 +413,9 @@ sd.on('propertyInspectorDidAppear', ({ context }) => {
 });
 
 sd.on('sendToPlugin', ({ context, payload }) => {
-  if (payload?.command === 'refresh') keys.get(context)?.refresh();
+  // force is the usage keys' word for "skip the TTL"; an agent key has no TTL
+  // to skip and ignores it.
+  if (payload?.command === 'refresh') keys.get(context)?.refresh({ force: true });
 });
 
 sd.on('socketError', (err) => {

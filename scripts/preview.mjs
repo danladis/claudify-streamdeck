@@ -22,6 +22,8 @@ const { clawdView, renderClawd, clawdFrameMs, ANIMATIONS, DEFAULT_ANIMATION } = 
   join(LIB, 'clawd.js'),
 );
 const { SPEEDS } = await import(join(LIB, 'settings.js'));
+const { renderBars } = await import(join(LIB, 'usage', 'bars.js'));
+const { renderGauge } = await import(join(LIB, 'usage', 'gauge.js'));
 
 const SUMMARIES = {
   clear: { ok: true, total: 0, working: 0, blocked: 0, idle: 0 },
@@ -133,6 +135,65 @@ const speedTiles = Object.keys(SPEEDS)
   )
   .join('\n');
 
+/* ---------------------------------------------------------- usage faces ---- */
+
+/** A fixed clock, so the countdown tiles do not change between runs. */
+const USAGE_NOW = new Date('2026-08-28T10:00:00.000Z');
+
+const usageSnapshot = (session, weekly, over = {}) => ({
+  session: { usedPercent: session, resetAt: '2026-08-28T18:30:00.000Z' },
+  weekly: { usedPercent: weekly, resetAt: '2026-09-01T09:00:00.000Z' },
+  status: 'ok',
+  updatedAt: USAGE_NOW.toISOString(),
+  stale: false,
+  thresholds: { warning: 70, critical: 90 },
+  ...over,
+});
+
+const USAGE_STATES = {
+  quiet: usageSnapshot(12, 30),
+  warming: usageSnapshot(74, 55),
+  critical: usageSnapshot(93, 88),
+  spent: usageSnapshot(100, 96),
+  stale: usageSnapshot(42, 68, { stale: true }),
+  'no data': usageSnapshot(null, null),
+  'login required': usageSnapshot(null, null, { status: 'auth' }),
+  'rate limited': usageSnapshot(null, null, { status: 'rateLimited' }),
+};
+
+const barsTiles = Object.entries(USAGE_STATES)
+  .map(([name, snapshot]) => tile(name, [renderBars(snapshot)], 0))
+  .join('\n');
+
+const gaugeTiles = Object.entries(USAGE_STATES)
+  .map(([name, snapshot]) =>
+    tile(name, [renderGauge(snapshot, { window: 'session', resetInfo: 'dateTime' }, USAGE_NOW)], 0),
+  )
+  .join('\n');
+
+/** The reset line is the only thing that moves the ring, so it gets its own row. */
+const resetTiles = ['none', 'dateTime', 'countdown', 'both']
+  .map((resetInfo) =>
+    tile(
+      resetInfo,
+      [renderGauge(USAGE_STATES.warming, { window: 'weekly', resetInfo }, USAGE_NOW)],
+      0,
+    ),
+  )
+  .join('\n');
+
+/** Every background the setting offers, on both faces. */
+const backgroundTiles = ['transparent', 'blue', 'gray']
+  .flatMap((background) => [
+    tile(`bars / ${background}`, [renderBars(USAGE_STATES.warming, { background })], 0),
+    tile(
+      `ring / ${background}`,
+      [renderGauge(USAGE_STATES.warming, { background, window: 'session', resetInfo: 'countdown' }, USAGE_NOW)],
+      0,
+    ),
+  ])
+  .join('\n');
+
 /* ---------------------------------------------------------------- page ---- */
 
 const page = `<!doctype html>
@@ -191,6 +252,26 @@ ${moveTiles}
 <h2>Speed (the wiggle)</h2>
 <div class="grid">
 ${speedTiles}
+</div>
+
+<h2>Usage &mdash; both windows</h2>
+<div class="grid">
+${barsTiles}
+</div>
+
+<h2>Usage &mdash; one window</h2>
+<div class="grid">
+${gaugeTiles}
+</div>
+
+<h2>Usage &mdash; reset line</h2>
+<div class="grid">
+${resetTiles}
+</div>
+
+<h2>Usage &mdash; backgrounds</h2>
+<div class="grid">
+${backgroundTiles}
 </div>
 `;
 

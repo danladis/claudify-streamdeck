@@ -43,6 +43,27 @@ const { normalize, probeKey, resolveTransport, SPEEDS, speedFactor } = await imp
   join(LIB, 'settings.js'),
 );
 
+const USAGE = join(LIB, 'usage');
+const { statusForPercent, worstStatus, normalizeUsage, emptySnapshot } = await import(
+  join(USAGE, 'snapshot.js'),
+);
+const { normalize: normalizeUsageSettings, MIN_INTERVAL, thresholdsFor } = await import(
+  join(USAGE, 'settings.js'),
+);
+const { readCredentials, resolveCredentialsPath, isExpired } = await import(
+  join(USAGE, 'credentials.js'),
+);
+const { UsageCache, MIN_RATE_LIMIT_BACKOFF_MS } = await import(join(USAGE, 'cache.js'));
+const { getUsage } = await import(join(USAGE, 'provider.js'));
+const { UnauthorizedError, authRequired, rateLimited, parseRetryAfterMs } = await import(
+  join(USAGE, 'errors.js'),
+);
+const { renderBars } = await import(join(USAGE, 'bars.js'));
+const { renderGauge } = await import(join(USAGE, 'gauge.js'));
+const { formatResetTime, formatCountdown } = await import(join(USAGE, 'time.js'));
+const { mkdtemp, writeFile, mkdir, rm } = await import('node:fs/promises');
+const { tmpdir } = await import('node:os');
+
 const agent = (over = {}) => ({
   pid: 1,
   cwd: '/repo',
@@ -620,4 +641,569 @@ test('nothing meant to be seen is spawned with windowsHide', () => {
   // instance, so every subsequent launch vanishes into it too.
   assert.match(launch, /hideWindow = true/, 'hidden is the default for silent work');
   assert.match(launch, /firstThatStarts\(candidates, \{ hideWindow: false \}\)/, 'terminals are visible');
+});
+
+/* --------------------------------------------------------- usage bands ---- */
+
+/** A believable reading, for the faces and the cache to chew on. */
+const usageSnapshot = (over = {}) => ({
+  session: { usedPercent: 42, resetAt: '2026-08-28T18:30:00.000Z' },
+  weekly: { usedPercent: 68, resetAt: '2026-09-01T09:00:00.000Z' },
+  status: 'ok',
+  updatedAt: '2026-08-28T10:00:00.000Z',
+  stale: false,
+  thresholds: { warning: 70, critical: 90 },
+  ...over,
+});
+
+
+test('a percentage falls in the band its thresholds put it in', () => {
+  assert.equal(statusForPercent(0), 'ok');
+  assert.equal(statusForPercent(69), 'ok');
+  assert.equal(statusForPercent(70), 'warning');
+  assert.equal(statusForPercent(89), 'warning');
+  assert.equal(statusForPercent(90), 'critical');
+  assert.equal(statusForPercent(99), 'critical');
+  // 100 is its own band: spent is not merely critical.
+  assert.equal(statusForPercent(100), 'limited');
+
+  const strict = { warning: 30, critical: 50 };
+  assert.equal(statusForPercent(31, strict), 'warning');
+  assert.equal(statusForPercent(51, strict), 'critical');
+});
+
+test('the overall status is the worse window, and unknowns do not count', () => {
+  const window = (usedPercent) => ({ usedPercent, resetAt: null });
+
+  assert.equal(worstStatus(window(10), window(95)), 'critical');
+  assert.equal(worstStatus(window(95), window(10)), 'critical');
+  assert.equal(worstStatus(window(10), window(null)), 'ok');
+  assert.equal(worstStatus(window(null), window(75)), 'warning');
+  // Nothing known is not an alarm -- the caller decides if an error applies.
+  assert.equal(worstStatus(window(null), window(null)), 'ok');
+});
+
+test('a raw response becomes a snapshot, and a broken one still does', () => {
+  const snapshot = normalizeUsage({
+    five_hour: { utilization: 42.4, resets_at: '2026-08-28T18:30:00.000Z' },
+    seven_day: { utilization: 91.6, resets_at: '2026-09-01T09:00:00.000Z' },
+  });
+
+  assert.equal(snapshot.session.usedPercent, 42);
+  assert.equal(snapshot.weekly.usedPercent, 92);
+  assert.equal(snapshot.session.resetAt, '2026-08-28T18:30:00.000Z');
+  assert.equal(snapshot.status, 'critical');
+  assert.equal(snapshot.stale, false);
+
+  // utilization is a percentage, not a fraction, and it is clamped either way.
+  assert.equal(normalizeUsage({ five_hour: { utilization: 140 } }).session.usedPercent, 100);
+  assert.equal(normalizeUsage({ five_hour: { utilization: -5 } }).session.usedPercent, 0);
+
+  // The endpoint is unofficial: absent, null and nonsense fields all have to
+  // land on null rather than throw.
+  const empty = normalizeUsage({});
+  assert.equal(empty.session.usedPercent, null);
+  assert.equal(empty.weekly.resetAt, null);
+  assert.equal(normalizeUsage({ five_hour: { utilization: 'lots' } }).session.usedPercent, null);
+  assert.equal(normalizeUsage({ five_hour: null }).session.usedPercent, null);
+});
+
+/* ------------------------------------------------------ usage settings ---- */
+
+test('usage settings are clamped, and the refresh floor is the rate limit', () => {
+  const settings = normalizeUsageSettings({
+    interval: 5,
+    warning: 200,
+    critical: -1,
+    window: 'nonsense',
+    background: 'chartreuse',
+    credentialsPath: '  ',
+  });
+
+  // 5s would trip the endpoint's own throttle within a minute.
+  assert.equal(settings.interval, MIN_INTERVAL);
+  assert.equal(settings.warning, 100);
+  // Critical can never sit below warning, or the bands would run backwards.
+  assert.equal(settings.critical, 100);
+  assert.equal(settings.window, 'session');
+  assert.equal(settings.background, 'transparent');
+  assert.equal(settings.credentialsPath, '');
+
+  assert.equal(normalizeUsageSettings({ interval: 99999 }).interval, 3600);
+  assert.equal(normalizeUsageSettings().interval, 120);
+  assert.deepEqual(thresholdsFor(normalizeUsageSettings()), { warning: 70, critical: 90 });
+});
+
+test('the key defaults to a transparent background', () => {
+  assert.equal(normalizeUsageSettings().background, 'transparent');
+  const svg = renderBars(usageSnapshot(), { background: 'transparent' });
+  assert.ok(!svg.includes('<rect width="144" height="144"'), 'no full-key fill');
+  assert.ok(renderBars(usageSnapshot(), { background: 'blue' }).includes('<rect width="144" height="144"'));
+});
+
+/* --------------------------------------------------------- credentials ---- */
+
+/** A home directory with nothing in it, so nothing reads the real account. */
+async function withEmptyHome(run) {
+  const home = await mkdtemp(join(tmpdir(), 'claudify-home-'));
+  try {
+    await run(home);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+}
+
+const CREDENTIALS = JSON.stringify({
+  claudeAiOauth: {
+    accessToken: 'FAKE_ACCESS_TOKEN',
+    refreshToken: 'FAKE_REFRESH_TOKEN',
+    expiresAt: 7258118400000,
+  },
+});
+
+test('credentials come from the file the CLI wrote', async () => {
+  await withEmptyHome(async (home) => {
+    await mkdir(join(home, '.claude'), { recursive: true });
+    await writeFile(join(home, '.claude', '.credentials.json'), CREDENTIALS);
+
+    const creds = await readCredentials(undefined, { home, platform: 'linux' });
+    assert.equal(creds.accessToken, 'FAKE_ACCESS_TOKEN');
+    assert.equal(creds.refreshToken, 'FAKE_REFRESH_TOKEN');
+    assert.equal(creds.expiresAt, 7258118400000);
+  });
+});
+
+test('on macOS a missing file falls through to the Keychain', async () => {
+  await withEmptyHome(async (home) => {
+    let asked = 0;
+    const creds = await readCredentials(undefined, {
+      home,
+      platform: 'darwin',
+      readBlob: async () => {
+        asked += 1;
+        return CREDENTIALS;
+      },
+    });
+    assert.equal(asked, 1);
+    assert.equal(creds.accessToken, 'FAKE_ACCESS_TOKEN');
+  });
+});
+
+test('everywhere else a missing file is simply missing', async () => {
+  await withEmptyHome(async (home) => {
+    let asked = 0;
+    await assert.rejects(
+      readCredentials(undefined, {
+        home,
+        platform: 'win32',
+        readBlob: async () => {
+          asked += 1;
+          return CREDENTIALS;
+        },
+      }),
+      (err) => err.status === 'auth',
+    );
+    assert.equal(asked, 0, 'the Keychain is a macOS answer only');
+  });
+});
+
+test('naming a credentials file opts out of the Keychain', async () => {
+  await withEmptyHome(async (home) => {
+    let asked = 0;
+    // A path the user typed is taken at face value: a missing file there is a
+    // mistake worth reporting, not a reason to read the real account instead.
+    await assert.rejects(
+      readCredentials(join(home, 'nowhere.json'), {
+        home,
+        platform: 'darwin',
+        readBlob: async () => {
+          asked += 1;
+          return CREDENTIALS;
+        },
+      }),
+      (err) => err.status === 'auth',
+    );
+    assert.equal(asked, 0);
+  });
+});
+
+test('an empty Keychain, or credentials without a token, mean log in again', async () => {
+  await withEmptyHome(async (home) => {
+    await assert.rejects(
+      readCredentials(undefined, { home, platform: 'darwin', readBlob: async () => null }),
+      (err) => err.status === 'auth',
+    );
+
+    await mkdir(join(home, '.claude'), { recursive: true });
+    await writeFile(join(home, '.claude', '.credentials.json'), '{"claudeAiOauth":{}}');
+    await assert.rejects(
+      readCredentials(undefined, { home, platform: 'linux' }),
+      (err) => err.status === 'auth',
+    );
+
+    await writeFile(join(home, '.claude', '.credentials.json'), 'not json');
+    await assert.rejects(
+      readCredentials(undefined, { home, platform: 'linux' }),
+      (err) => err.status === 'auth',
+    );
+  });
+});
+
+test('no failure message ever carries token material', async () => {
+  await withEmptyHome(async (home) => {
+    await mkdir(join(home, '.claude'), { recursive: true });
+    await writeFile(join(home, '.claude', '.credentials.json'), '{"claudeAiOauth":{"accessToken":1}}');
+
+    const err = await readCredentials(undefined, { home, platform: 'linux' }).catch((e) => e);
+    // These strings reach Stream Deck's log and the settings panel.
+    assert.ok(!/FAKE|token":|Bearer/.test(err.message), err.message);
+  });
+});
+
+test('an expiry within the skew counts as expired, and a missing one does not', () => {
+  const now = 1_000_000;
+  assert.equal(isExpired(now + 5 * 60000, undefined, now), false);
+  assert.equal(isExpired(now + 30000, undefined, now), true, 'inside the 60s skew');
+  assert.equal(isExpired(now - 1, undefined, now), true);
+  // Unknown expiry: let the endpoint decide, and let its 401 drive the refresh.
+  assert.equal(isExpired(null, undefined, now), false);
+});
+
+test('a credentials path expands ~ but is otherwise taken as given', () => {
+  assert.equal(resolveCredentialsPath('', '/home/x'), join('/home/x', '.claude', '.credentials.json'));
+  assert.equal(resolveCredentialsPath('~/creds.json', '/home/x'), join('/home/x', 'creds.json'));
+  assert.equal(resolveCredentialsPath('  ', '/home/x'), join('/home/x', '.claude', '.credentials.json'));
+});
+
+/* --------------------------------------------------------- usage cache ---- */
+
+/** A clock the test drives by hand, so backoffs can be waited out instantly. */
+function fakeClock(start = 1_000_000) {
+  let at = start;
+  return { now: () => at, advance: (ms) => (at += ms) };
+}
+
+test('a reading inside its TTL costs nothing, and a press skips the wait', async () => {
+  const clock = fakeClock();
+  const cache = new UsageCache({ ttlMs: 60000, now: clock.now, forceMinIntervalMs: 0 });
+  let fetches = 0;
+  const fetcher = async () => {
+    fetches += 1;
+    return usageSnapshot({ session: { usedPercent: fetches, resetAt: null } });
+  };
+
+  await cache.get(fetcher);
+  await cache.get(fetcher);
+  assert.equal(fetches, 1, 'the second key shares the first key’s reading');
+
+  await cache.get(fetcher, { force: true });
+  assert.equal(fetches, 2, 'a press goes and looks');
+
+  clock.advance(60001);
+  await cache.get(fetcher);
+  assert.equal(fetches, 3, 'and the TTL runs out on its own');
+});
+
+test('keys asking at once share one request', async () => {
+  const cache = new UsageCache({ ttlMs: 60000 });
+  let fetches = 0;
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  const fetcher = async () => {
+    fetches += 1;
+    await gate;
+    return usageSnapshot();
+  };
+
+  const all = Promise.all([cache.get(fetcher), cache.get(fetcher), cache.get(fetcher)]);
+  release();
+  await all;
+  assert.equal(fetches, 1);
+});
+
+test('leaning on the key cannot turn into a flood of requests', async () => {
+  const clock = fakeClock();
+  const cache = new UsageCache({ ttlMs: 60000, forceMinIntervalMs: 10000, now: clock.now });
+  let fetches = 0;
+  const fetcher = async () => {
+    fetches += 1;
+    return usageSnapshot();
+  };
+
+  await cache.get(fetcher, { force: true });
+  await cache.get(fetcher, { force: true });
+  await cache.get(fetcher, { force: true });
+  assert.equal(fetches, 1, 'presses inside the window re-serve what is held');
+
+  clock.advance(10001);
+  await cache.get(fetcher, { force: true });
+  assert.equal(fetches, 2);
+});
+
+test('a failed refresh keeps the last good numbers and says they are old', async () => {
+  const clock = fakeClock();
+  const cache = new UsageCache({ ttlMs: 1000, now: clock.now, forceMinIntervalMs: 0 });
+
+  const good = await cache.get(async () => usageSnapshot());
+  assert.equal(good.stale, false);
+
+  clock.advance(2000);
+  const stale = await cache.get(async () => {
+    throw authRequired('Claude credentials not found.');
+  });
+  // Real numbers an hour old beat an error face: the limits move slowly, and
+  // the face carries a marker saying the reading is stale.
+  assert.equal(stale.stale, true);
+  assert.equal(stale.status, 'stale');
+  assert.equal(stale.staleReason, 'error');
+  assert.equal(stale.session.usedPercent, 42);
+});
+
+test('with nothing held yet, a failure is the face', async () => {
+  const cache = new UsageCache({ ttlMs: 1000 });
+  const snapshot = await cache.get(async () => {
+    throw authRequired('Claude credentials not found.');
+  });
+  assert.equal(snapshot.status, 'auth');
+  assert.equal(snapshot.stale, false);
+  assert.equal(snapshot.session.usedPercent, null);
+});
+
+test('a rate limit stops the network, and Retry-After: 0 does not restart it', async () => {
+  const clock = fakeClock();
+  const cache = new UsageCache({ ttlMs: 1000, now: clock.now, forceMinIntervalMs: 0 });
+  let fetches = 0;
+
+  const throttled = async () => {
+    fetches += 1;
+    // This endpoint really does answer 0 while still throttling.
+    throw rateLimited('Claude usage rate limit reached.', 0);
+  };
+
+  await cache.get(throttled);
+  assert.equal(fetches, 1);
+
+  clock.advance(30000);
+  await cache.get(throttled, { force: true });
+  assert.equal(fetches, 1, 'still inside the floor, even for a press');
+
+  clock.advance(MIN_RATE_LIMIT_BACKOFF_MS);
+  await cache.get(throttled, { force: true });
+  assert.equal(fetches, 2);
+});
+
+/* ------------------------------------------------------ usage pipeline ---- */
+
+const fakeCredentials = { accessToken: 'A', refreshToken: 'R', expiresAt: null };
+
+test('a spent token is refreshed before the request goes out', async () => {
+  const cache = new UsageCache({ ttlMs: 0 });
+  let refreshes = 0;
+  let usedToken = '';
+
+  await getUsage({
+    cache,
+    deps: {
+      readCredentials: async () => ({ ...fakeCredentials, expiresAt: 500 }),
+      refreshToken: async () => {
+        refreshes += 1;
+        return { accessToken: 'FRESH' };
+      },
+      fetchUsage: async (token) => {
+        usedToken = token;
+        return { five_hour: { utilization: 10 } };
+      },
+      now: () => 1000,
+    },
+  });
+
+  assert.equal(refreshes, 1);
+  assert.equal(usedToken, 'FRESH');
+});
+
+test('a 401 buys one refresh and one retry, and a second 401 is the answer', async () => {
+  const attempt = async (failures) => {
+    let calls = 0;
+    return getUsage({
+      cache: new UsageCache({ ttlMs: 0 }),
+      deps: {
+        readCredentials: async () => fakeCredentials,
+        refreshToken: async () => ({ accessToken: 'FRESH' }),
+        fetchUsage: async () => {
+          calls += 1;
+          if (calls <= failures) throw new UnauthorizedError();
+          return { five_hour: { utilization: 10 }, seven_day: { utilization: 20 } };
+        },
+        now: () => 1000,
+      },
+    });
+  };
+
+  // The token can go stale between the expiry check and the request.
+  assert.equal((await attempt(1)).status, 'ok');
+  // Twice is not a race, it is a verdict.
+  assert.equal((await attempt(2)).status, 'auth');
+});
+
+test('the pipeline never throws -- a key always has something to draw', async () => {
+  const snapshot = await getUsage({
+    cache: new UsageCache({ ttlMs: 0 }),
+    deps: {
+      readCredentials: async () => {
+        throw new Error('something unforeseen');
+      },
+      now: () => 1000,
+    },
+  });
+  assert.equal(snapshot.status, 'error');
+});
+
+test('a Retry-After is read in seconds, and nonsense is ignored', () => {
+  assert.equal(parseRetryAfterMs('300'), 300000);
+  assert.equal(parseRetryAfterMs('0'), 0);
+  assert.equal(parseRetryAfterMs(null), undefined);
+  assert.equal(parseRetryAfterMs('Wed, 21 Oct 2026 07:28:00 GMT'), undefined);
+  assert.equal(parseRetryAfterMs('-5'), undefined);
+});
+
+/* --------------------------------------------------------- usage faces ---- */
+
+const rects = (svg) => [...svg.matchAll(/<rect\b[^>]*>/g)].map((m) => m[0]);
+
+test('the two-window face draws a bar per window, filled to its percentage', () => {
+  const svg = renderBars(usageSnapshot());
+
+  assert.ok(svg.startsWith('<svg'), 'well formed');
+  assert.ok(svg.endsWith('</svg>'));
+  assert.match(svg, />5H</);
+  assert.match(svg, />7D</);
+  assert.match(svg, />42%</);
+  assert.match(svg, />68%</);
+
+  // Track plus fill for each window, and the fill is proportional: the bar is
+  // 120 wide, so 42% is 50 and 68% is 82.
+  const widths = rects(svg)
+    .map((rect) => rect.match(/width="(\d+)"/))
+    .filter(Boolean)
+    .map((m) => Number(m[1]));
+  assert.ok(widths.includes(50), 'the 5H fill');
+  assert.ok(widths.includes(82), 'the 7D fill');
+});
+
+test('a bar is coloured by its own window, not by the worst of the two', () => {
+  const svg = renderBars(
+    usageSnapshot({
+      session: { usedPercent: 5, resetAt: null },
+      weekly: { usedPercent: 95, resetAt: null },
+      status: 'critical',
+    }),
+  );
+  // Green for the quiet window even while the other one is orange -- one spent
+  // limit should not make the untouched one look spent too.
+  assert.match(svg, /#4ade80/);
+  assert.match(svg, /#fb923c/);
+});
+
+test('an empty window shows a dash, and 0% draws no stub of colour', () => {
+  const svg = renderBars(
+    usageSnapshot({ session: { usedPercent: null, resetAt: null }, weekly: { usedPercent: 0, resetAt: null } }),
+  );
+  assert.match(svg, />--</);
+  // A rounded rect of zero width still paints its own corners.
+  assert.ok(!svg.includes('width="0"'), 'no zero-width fill');
+});
+
+test('nothing in either window is an error, not a pair of empty bars', () => {
+  const svg = renderBars(
+    usageSnapshot({
+      session: { usedPercent: null, resetAt: null },
+      weekly: { usedPercent: null, resetAt: null },
+    }),
+  );
+  assert.match(svg, />No Data</);
+});
+
+test('the failures each say what to do about them', () => {
+  assert.match(renderBars(usageSnapshot({ status: 'auth' })), />Login</);
+  assert.match(renderBars(usageSnapshot({ status: 'rateLimited' })), />Rate</);
+  assert.match(renderBars(usageSnapshot({ status: 'error' })), />Error</);
+});
+
+test('a stale reading is marked, but keeps its numbers and its colours', () => {
+  const svg = renderBars(usageSnapshot({ stale: true }));
+  assert.match(svg, />42%</, 'the last known numbers still show');
+  assert.match(svg, /<circle cx="132" cy="12"/, 'with a dot in the corner');
+  assert.ok(!renderBars(usageSnapshot()).includes('<circle'), 'and no dot when fresh');
+});
+
+test('the ring fills three quarters of a turn at 100%, and is a stub at 1%', () => {
+  const sweep = (svg) => {
+    // Two arcs: the track, then the fill. Their end points say how far each ran.
+    const paths = [...svg.matchAll(/<path d="M ([\d.]+) ([\d.]+) A/g)];
+    return paths.length;
+  };
+  const full = renderGauge(usageSnapshot({ session: { usedPercent: 100, resetAt: null } }), {
+    window: 'session',
+    resetInfo: 'none',
+  });
+  assert.equal(sweep(full), 2, 'track and fill');
+  assert.match(full, />100</);
+
+  // At 0 the fill is omitted rather than drawn as a dot of colour.
+  const empty = renderGauge(usageSnapshot({ session: { usedPercent: 0, resetAt: null } }), {
+    window: 'session',
+    resetInfo: 'none',
+  });
+  assert.equal(sweep(empty), 1, 'the track alone');
+});
+
+test('the single-window face shows the window it was pointed at', () => {
+  const options = { window: 'weekly', resetInfo: 'none' };
+  const svg = renderGauge(usageSnapshot(), options);
+  assert.match(svg, />68</, 'the weekly number');
+  assert.match(svg, />7D</);
+  assert.ok(!svg.includes('>42<'), 'and not the session one');
+});
+
+test('the reset line follows the setting, and the ring makes room for it', () => {
+  const now = new Date('2026-08-28T10:00:00.000Z');
+  const at = (resetInfo) =>
+    renderGauge(usageSnapshot(), { window: 'session', resetInfo, dateFormat: 'isoShort' }, now);
+
+  assert.ok(!/<text[^>]*font-size="13"/.test(at('none')), 'nothing under the ring');
+  assert.equal((at('dateTime').match(/font-size="13"/g) || []).length, 1);
+  assert.equal((at('both').match(/font-size="13"/g) || []).length, 2);
+  assert.match(at('countdown'), />in 8h 30m</);
+
+  // Two lines push the ring up so the face stays optically centred.
+  const centre = (svg) => Number(svg.match(/<path d="M [\d.]+ ([\d.]+) A/)[1]);
+  assert.ok(centre(at('both')) < centre(at('none')));
+});
+
+/* ---------------------------------------------------------- reset time ---- */
+
+test('a reset time reads the way the setting asks', () => {
+  // Built from parts rather than a literal, so the test does not depend on the
+  // timezone the suite happens to run in.
+  const at = new Date(2026, 4, 31, 14, 6);
+  const iso = at.toISOString();
+
+  assert.equal(formatResetTime(iso, 'dayMonth'), '31 May, 14:06');
+  assert.equal(formatResetTime(iso, 'isoShort'), '05/31 14:06');
+  assert.equal(formatResetTime(iso, 'weekday'), 'Sun 14:06');
+
+  // A missing or unparseable timestamp shows nothing, never 'Invalid Date'.
+  assert.equal(formatResetTime(null), null);
+  assert.equal(formatResetTime('whenever'), null);
+});
+
+test('a countdown coarsens as it lengthens, and bottoms out at now', () => {
+  const now = new Date('2026-08-28T10:00:00.000Z');
+  const inMs = (ms) => new Date(now.getTime() + ms).toISOString();
+
+  assert.equal(formatCountdown(inMs(42 * 60000), now), '42m');
+  assert.equal(formatCountdown(inMs(7 * 3600000 + 58 * 60000), now), '7h 58m');
+  assert.equal(formatCountdown(inMs(2 * 86400000 + 3 * 3600000), now), '2d 3h');
+  assert.equal(formatCountdown(inMs(-1), now), 'now');
+  assert.equal(formatCountdown(null, now), null);
 });
