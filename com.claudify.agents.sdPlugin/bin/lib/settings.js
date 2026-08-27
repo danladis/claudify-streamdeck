@@ -17,7 +17,7 @@ export const DEFAULTS = {
   /** How fast either face animates: see SPEEDS. */
   speed: 'normal',
   /** Which move Clawd makes on the mascot key: see ANIMATIONS in clawd.js. */
-  clawdAnimation: 'wiggle',
+  clawdAnimation: 'random',
   /** Ring stroke weight: see THICKNESS in render.js. */
   thickness: 'normal',
   /** Show the Claude mark in the top-right corner of the ring key. */

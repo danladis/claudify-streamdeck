@@ -353,8 +353,11 @@ const BADGES = { blocked: '#fbbf24', error: '#f87171' };
 export function clawdView(summary, settings = {}) {
   if (!summary.ok) {
     // Skipped, not broken: don't raise a red flag over a poll that
-    // deliberately declined to wake a sleeping WSL distro.
-    if (summary.error === 'wsl-asleep') return { sequence: STILL, body: CLAWD_DIM, badge: null, state: 'empty' };
+    // deliberately declined to wake a sleeping WSL distro. Dimmed and asleep,
+    // the same as "nothing running" -- from here it looks the same.
+    if (summary.error === 'wsl-asleep') {
+      return { sequence: SLEEP, body: CLAWD_DIM, badge: null, state: 'empty', sleep: true };
+    }
     return { sequence: STILL, body: CLAWD_DIM, badge: BADGES.error, state: 'error' };
   }
   // Still means not progressing, the same as on the ring key -- so a blocked
@@ -363,10 +366,10 @@ export function clawdView(summary, settings = {}) {
   if (summary.working > 0) {
     return { sequence: animationFor(settings).sequence, body: CLAWD_BODY, badge: null, state: 'working' };
   }
-  if (summary.total === 0) return { sequence: STILL, body: CLAWD_DIM, badge: null, state: 'empty' };
-  // Nothing is working or blocked: every agent is just sitting there, so
-  // Clawd naps -- eyes closed, a "zZ" over his head -- rather than idling
-  // with the same open-eyed pose as an empty key.
+  // Nothing running, or nothing left to do but sit there: either way Clawd
+  // naps -- eyes closed, a "zZ" over his head -- rather than idling with the
+  // same open-eyed pose whether or not there's anything to watch.
+  if (summary.total === 0) return { sequence: SLEEP, body: CLAWD_DIM, badge: null, state: 'empty', sleep: true };
   return { sequence: SLEEP, body: CLAWD_BODY, badge: null, state: 'idle', sleep: true };
 }
 
