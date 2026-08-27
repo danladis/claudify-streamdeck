@@ -1,5 +1,9 @@
 # Claude Agent Status for Stream Deck
 
+![Four Stream Deck keys: usage bars reading 5H 11% and 7D 6%, a ring reading 11% for the 5-hour window with its reset time, an agent count of 1, and Clawd the mascot](docs/keys.png)
+
+*Usage Limits · Usage (one window) · Agent Count · Clawd*
+
 A Stream Deck plugin for keeping an eye on Claude Code. Four keys:
 
 | Key | Shows |
