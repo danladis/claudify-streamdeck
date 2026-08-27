@@ -1,0 +1,65 @@
+{
+    "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+    "UUID": "com.claudify.agents",
+    "Name": "Claude Agent Status",
+    "Version": "1.0.0.0",
+    "Author": "danladis",
+    "Description": "Live count of your running Claude Code agents on a key: a ring that spins while they work and turns amber when one needs you, plus Clawd wiggling along.",
+    "Category": "Claude Agents",
+    "CategoryIcon": "imgs/plugin/category",
+    "Icon": "imgs/plugin/marketplace",
+    "SDKVersion": 2,
+    "CodePath": "bin/plugin.js",
+    "Nodejs": {
+        "Version": "20"
+    },
+    "Software": {
+        "MinimumVersion": "6.5"
+    },
+    "OS": [
+        {
+            "Platform": "windows",
+            "MinimumVersion": "10"
+        },
+        {
+            "Platform": "mac",
+            "MinimumVersion": "10.15"
+        }
+    ],
+    "Actions": [
+        {
+            "UUID": "com.claudify.agents.count",
+            "Name": "Agent Count",
+            "Icon": "imgs/actions/count/icon",
+            "Tooltip": "A ring and a count: how many Claude Code agents are running.",
+            "PropertyInspectorPath": "ui/count.html",
+            "Controllers": [
+                "Keypad"
+            ],
+            "States": [
+                {
+                    "Image": "imgs/actions/count/key",
+                    "TitleAlignment": "middle",
+                    "ShowTitle": false
+                }
+            ]
+        },
+        {
+            "UUID": "com.claudify.agents.mascot",
+            "Name": "Clawd",
+            "Icon": "imgs/actions/mascot/icon",
+            "Tooltip": "Clawd wiggles, scuttles or jumps while your Claude Code agents are working.",
+            "PropertyInspectorPath": "ui/count.html",
+            "Controllers": [
+                "Keypad"
+            ],
+            "States": [
+                {
+                    "Image": "imgs/actions/mascot/key",
+                    "TitleAlignment": "middle",
+                    "ShowTitle": false
+                }
+            ]
+        }
+    ]
+}

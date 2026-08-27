@@ -1,0 +1,75 @@
+#!/bin/sh
+# Snapshot of every live Claude Code session on this machine, as one JSON blob.
+#
+# Fed to `sh -s` on stdin (directly, or through `wsl.exe`) so nothing has to be
+# installed on the Linux side and no shell quoting crosses the Windows boundary.
+# Placeholders are substituted by lib/probe.js before the script is piped in.
+
+CLAUDE_OVERRIDE='__CLAUDE_BIN__'
+CWD_FILTER='__CWD_FILTER__'
+
+find_claude() {
+  # An explicit path is a promise, not a hint: if it is wrong, say so instead of
+  # quietly counting agents from some other binary.
+  if [ -n "$CLAUDE_OVERRIDE" ]; then
+    [ -x "$CLAUDE_OVERRIDE" ] || return 1
+    printf '%s' "$CLAUDE_OVERRIDE"
+    return 0
+  fi
+  # `sh -s` under wsl.exe is not a login shell, so ~/.local/bin is usually
+  # missing from PATH. Probe the standard install locations by hand.
+  for candidate in \
+    "$(command -v claude 2>/dev/null)" \
+    "$HOME/.local/bin/claude" \
+    "$HOME/.claude/local/claude" \
+    /usr/local/bin/claude \
+    /opt/homebrew/bin/claude
+  do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+json_string() {
+  # Minimal JSON string escaper for the diagnostic fields we emit.
+  printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+}
+
+# Output is a sequence of CLAUDIFY-<SECTION> markers, each followed by one JSON
+# document. Keeping the sections separate means a job state file caught
+# mid-write costs only that job's detail, not the whole reading.
+CLAUDE="$(find_claude)"
+if [ -z "$CLAUDE" ]; then
+  printf 'CLAUDIFY-ERROR\n{"error":"claude-not-found"}\n'
+  exit 0
+fi
+
+if [ -n "$CWD_FILTER" ]; then
+  AGENTS="$("$CLAUDE" agents --json --cwd "$CWD_FILTER" 2>/dev/null)"
+else
+  AGENTS="$("$CLAUDE" agents --json 2>/dev/null)"
+fi
+STATUS=$?
+
+if [ $STATUS -ne 0 ] || [ -z "$AGENTS" ]; then
+  printf 'CLAUDIFY-ERROR\n{"error":"agents-command-failed","exitCode":%d,"claude":%s}\n' \
+    "$STATUS" "$(json_string "$CLAUDE")"
+  exit 0
+fi
+
+printf 'CLAUDIFY-META\n{"claude":%s}\n' "$(json_string "$CLAUDE")"
+printf 'CLAUDIFY-AGENTS\n%s\n' "$AGENTS"
+
+# `claude agents --json` reports busy/idle but not *why* a background agent is
+# idle. The per-job state file carries that ("tempo":"blocked", "needs":"..."),
+# so ship it along and let the plugin join the two on sessionId.
+for state in "$HOME"/.claude/jobs/*/state.json; do
+  [ -f "$state" ] || continue
+  printf 'CLAUDIFY-JOB\n'
+  cat "$state"
+  printf '\n'
+done
+printf 'CLAUDIFY-END\n'

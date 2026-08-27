@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Claude Agents</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #2d2d2d;
+        --field: #3d3d3d;
+        --edge: #4a4a4a;
+        --text: #d8d8d8;
+        --muted: #969696;
+        --accent: #77f;
+        --green: #4ade80;
+        --amber: #fbbf24;
+        --red: #f87171;
+      }
+
+      body {
+        margin: 0;
+        padding: 12px 14px 18px;
+        background: var(--bg);
+        color: var(--text);
+        font: 9pt/1.5 'Segoe UI', -apple-system, sans-serif;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 26px;
+        margin-bottom: 6px;
+      }
+
+      .row > label:first-child {
+        flex: 0 0 96px;
+        text-align: right;
+        color: var(--muted);
+        font-size: 9pt;
+      }
+
+      .row > .control {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+
+      input[type='text'],
+      input[type='number'],
+      select {
+        width: 100%;
+        box-sizing: border-box;
+        background: var(--field);
+        color: var(--text);
+        border: 1px solid var(--edge);
+        border-radius: 3px;
+        padding: 4px 6px;
+        font: inherit;
+      }
+
+      input[type='checkbox'] {
+        accent-color: var(--accent);
+        margin: 0 6px 0 0;
+      }
+
+      .check {
+        display: flex;
+        align-items: center;
+        color: var(--text);
+      }
+
+      .hint {
+        margin: -2px 0 10px 104px;
+        color: var(--muted);
+        font-size: 8pt;
+      }
+
+      details {
+        margin: 10px 0 4px;
+        border-top: 1px solid var(--edge);
+        padding-top: 8px;
+      }
+
+      summary {
+        cursor: pointer;
+        color: var(--muted);
+        list-style: none;
+        user-select: none;
+      }
+
+      summary::before {
+        content: '\25B8';
+        display: inline-block;
+        width: 12px;
+        transition: transform 0.1s;
+      }
+
+      details[open] summary::before {
+        transform: rotate(90deg);
+      }
+
+      .status {
+        margin-top: 12px;
+        border-top: 1px solid var(--edge);
+        padding-top: 10px;
+      }
+
+      .status-line {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--muted);
+        flex: 0 0 auto;
+      }
+
+      .dot.ok {
+        background: var(--green);
+      }
+      .dot.warn {
+        background: var(--amber);
+      }
+      .dot.bad {
+        background: var(--red);
+      }
+
+      #statusText {
+        flex: 1 1 auto;
+      }
+
+      button {
+        background: var(--field);
+        color: var(--text);
+        border: 1px solid var(--edge);
+        border-radius: 3px;
+        padding: 3px 10px;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #4a4a4a;
+      }
+
+      #agentList {
+        margin: 8px 0 0;
+        padding: 0;
+        list-style: none;
+        max-height: 132px;
+        overflow-y: auto;
+        font-size: 8pt;
+      }
+
+      #agentList li {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 0;
+        border-bottom: 1px solid #383838;
+      }
+
+      #agentList .name {
+        flex: 1 1 auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #agentList .state {
+        flex: 0 0 auto;
+        color: var(--muted);
+      }
+
+      .detail {
+        color: var(--muted);
+        font-size: 8pt;
+        margin-top: 4px;
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="row">
+      <label for="interval">Refresh</label>
+      <div class="control">
+        <select id="interval">
+          <option value="5">Every 5 seconds</option>
+          <option value="10">Every 10 seconds</option>
+          <option value="15">Every 15 seconds</option>
+          <option value="30">Every 30 seconds</option>
+          <option value="60">Every minute</option>
+          <option value="300">Every 5 minutes</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <label for="scope">Count</label>
+      <div class="control">
+        <select id="scope">
+          <option value="all">All sessions</option>
+          <option value="bg">Background agents only</option>
+          <option value="interactive">Interactive sessions only</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <label for="cwdFilter">Folder</label>
+      <div class="control">
+        <input id="cwdFilter" type="text" placeholder="All folders" />
+      </div>
+    </div>
+    <div class="hint">Only count sessions started under this path.</div>
+
+    <div class="row">
+      <label>&nbsp;</label>
+      <div class="control check">
+        <input id="animate" type="checkbox" />
+        <label id="animateLabel" for="animate">Spin the ring while agents are working</label>
+      </div>
+    </div>
+
+    <div id="mascotRows">
+      <div class="row">
+        <label for="clawdAnimation">Move</label>
+        <div class="control">
+          <select id="clawdAnimation">
+            <option value="wiggle">Wiggle in place</option>
+            <option value="scuttle">Scuttle sideways</option>
+            <option value="shimmy">Shimmy</option>
+            <option value="wave">Claw wave</option>
+            <option value="jump">Jump (Claude Code's own)</option>
+            <option value="random">Random</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div id="speedRow" class="row">
+      <label for="speed">Speed</label>
+      <div class="control">
+        <select id="speed">
+          <option value="crawl">Crawl</option>
+          <option value="slow">Slow</option>
+          <option value="normal">Normal</option>
+          <option value="brisk">Brisk</option>
+          <option value="frantic">Frantic</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="ringRows">
+      <div class="row">
+        <label for="thickness">Ring</label>
+        <div class="control">
+          <select id="thickness">
+            <option value="hairline">Hairline</option>
+            <option value="thin">Thin</option>
+            <option value="normal">Normal</option>
+            <option value="thick">Thick</option>
+            <option value="heavy">Heavy</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <label>&nbsp;</label>
+        <div class="control check">
+          <input id="showMark" type="checkbox" />
+          <label for="showMark">Show the Claude mark in the corner</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <label for="background">Background</label>
+      <div class="control">
+        <select id="background">
+          <option value="transparent">Transparent</option>
+          <option value="blue">Blue</option>
+          <option value="gray">Gray</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <label for="pressAction">On press</label>
+      <div class="control">
+        <select id="pressAction">
+          <option value="focus">Bring the terminal to the front</option>
+          <option value="agentView">Open a new agent view</option>
+          <option value="refresh">Just refresh</option>
+          <option value="custom">Run a command</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="customRow" hidden>
+      <div class="row">
+        <label for="customCommand">Command</label>
+        <div class="control">
+          <input id="customCommand" type="text" placeholder="claude --bg &quot;check the build&quot;" />
+        </div>
+      </div>
+      <div class="row">
+        <label>&nbsp;</label>
+        <div class="control check">
+          <input id="customInTerminal" type="checkbox" />
+          <label for="customInTerminal">Show it in a terminal window</label>
+        </div>
+      </div>
+    </div>
+
+    <details id="advanced">
+      <summary>Where Claude runs</summary>
+      <div class="row" style="margin-top: 8px">
+        <label for="transport">Host</label>
+        <div class="control">
+          <select id="transport">
+            <option value="auto">Auto</option>
+            <option value="wsl">WSL</option>
+            <option value="local">This machine</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <label for="distro">Distro</label>
+        <div class="control">
+          <input id="distro" type="text" placeholder="Default distro" />
+        </div>
+      </div>
+      <div class="row">
+        <label for="claudeBin">Claude binary</label>
+        <div class="control">
+          <input id="claudeBin" type="text" placeholder="Auto-detect" />
+        </div>
+      </div>
+      <div class="hint">Leave blank unless the key says "no claude".</div>
+    </details>
+
+    <div class="status">
+      <div class="status-line">
+        <span id="statusDot" class="dot"></span>
+        <span id="statusText">Waiting for the first reading…</span>
+        <button id="refresh" type="button">Refresh</button>
+      </div>
+      <div id="statusDetail" class="detail" hidden></div>
+      <ul id="agentList"></ul>
+    </div>
+
+    <script>
+      let socket = null;
+      let context = '';
+      let action = '';
+      let settings = {};
+
+      const el = (id) => document.getElementById(id);
+
+      const FIELDS = {
+        interval: { node: 'interval', kind: 'number' },
+        scope: { node: 'scope', kind: 'text' },
+        cwdFilter: { node: 'cwdFilter', kind: 'text' },
+        animate: { node: 'animate', kind: 'bool' },
+        speed: { node: 'speed', kind: 'text' },
+        clawdAnimation: { node: 'clawdAnimation', kind: 'text' },
+        thickness: { node: 'thickness', kind: 'text' },
+        showMark: { node: 'showMark', kind: 'bool' },
+        background: { node: 'background', kind: 'text' },
+        pressAction: { node: 'pressAction', kind: 'text' },
+        customCommand: { node: 'customCommand', kind: 'text' },
+        customInTerminal: { node: 'customInTerminal', kind: 'bool' },
+        transport: { node: 'transport', kind: 'text' },
+        distro: { node: 'distro', kind: 'text' },
+        claudeBin: { node: 'claudeBin', kind: 'text' },
+      };
+
+      const DEFAULTS = {
+        interval: 30,
+        scope: 'all',
+        cwdFilter: '',
+        animate: true,
+        speed: 'normal',
+        clawdAnimation: 'wiggle',
+        thickness: 'normal',
+        showMark: true,
+        background: 'transparent',
+        pressAction: 'focus',
+        customCommand: '',
+        customInTerminal: true,
+        transport: 'auto',
+        distro: '',
+        claudeBin: '',
+      };
+
+      function hydrate() {
+        for (const [key, field] of Object.entries(FIELDS)) {
+          const node = el(field.node);
+          const value = settings[key] !== undefined ? settings[key] : DEFAULTS[key];
+          if (field.kind === 'bool') node.checked = value !== false;
+          else node.value = String(value);
+        }
+        syncVisibility();
+      }
+
+      function collect() {
+        const next = {};
+        for (const [key, field] of Object.entries(FIELDS)) {
+          const node = el(field.node);
+          if (field.kind === 'bool') next[key] = node.checked;
+          else if (field.kind === 'number') next[key] = Number(node.value);
+          else next[key] = node.value;
+        }
+        return next;
+      }
+
+      const MASCOT = 'com.claudify.agents.mascot';
+
+      function syncVisibility() {
+        el('customRow').hidden = el('pressAction').value !== 'custom';
+        // The mascot key has no ring to style.
+        const isMascot = action === MASCOT;
+        el('ringRows').hidden = isMascot;
+        // Each key styles only its own face, and neither speed nor move is
+        // worth showing while the face is holding still.
+        el('mascotRows').hidden = !isMascot || !el('animate').checked;
+        el('speedRow').hidden = !el('animate').checked;
+        el('animateLabel').textContent = isMascot
+          ? 'Let Clawd move while agents are working'
+          : 'Spin the ring while agents are working';
+      }
+
+      function save() {
+        settings = collect();
+        syncVisibility();
+        if (socket && socket.readyState === 1) {
+          socket.send(JSON.stringify({ event: 'setSettings', context, payload: settings }));
+        }
+      }
+
+      function describe(status) {
+        const dot = el('statusDot');
+        const text = el('statusText');
+        const detail = el('statusDetail');
+        const list = el('agentList');
+
+        if (!status.ok) {
+          dot.className = 'dot bad';
+          text.textContent = 'Could not read your agents';
+          detail.textContent = status.hint || '';
+          detail.hidden = !status.hint;
+          list.innerHTML = '';
+          return;
+        }
+
+        dot.className = 'dot ' + (status.blocked > 0 ? 'warn' : 'ok');
+        const parts = [];
+        if (status.working) parts.push(status.working + ' working');
+        if (status.blocked) parts.push(status.blocked + ' waiting on you');
+        if (status.idle) parts.push(status.idle + ' idle');
+        text.textContent = status.total === 0 ? 'No agents running' : parts.join(', ');
+
+        detail.textContent = status.claude ? status.claude + '  (' + status.transport + ')' : '';
+        detail.hidden = !status.claude;
+
+        list.innerHTML = '';
+        for (const agent of status.agents || []) {
+          const item = document.createElement('li');
+          const name = document.createElement('span');
+          name.className = 'name';
+          name.textContent = agent.name || agent.cwd || 'session';
+          name.title = agent.cwd || '';
+          const state = document.createElement('span');
+          state.className = 'state';
+          state.textContent = agent.state === 'blocked' && agent.needs ? agent.needs : agent.state;
+          item.append(name, state);
+          list.append(item);
+        }
+      }
+
+      for (const field of Object.values(FIELDS)) {
+        const node = el(field.node);
+        node.addEventListener('change', save);
+        if (node.tagName === 'INPUT' && node.type === 'text') node.addEventListener('blur', save);
+      }
+
+      el('refresh').addEventListener('click', () => {
+        if (socket && socket.readyState === 1) {
+          socket.send(
+            JSON.stringify({ event: 'sendToPlugin', context, action, payload: { command: 'refresh' } }),
+          );
+        }
+      });
+
+      // eslint-disable-next-line no-unused-vars
+      function connectElgatoStreamDeckSocket(port, propertyInspectorUUID, registerEvent, info, actionInfo) {
+        context = propertyInspectorUUID;
+
+        let parsed = {};
+        try {
+          parsed = JSON.parse(actionInfo);
+        } catch (err) {
+          parsed = {};
+        }
+        action = parsed.action || 'com.claudify.agents.count';
+        settings = (parsed.payload && parsed.payload.settings) || {};
+        hydrate();
+
+
+        socket = new WebSocket('ws://127.0.0.1:' + port);
+        socket.onopen = () => {
+          socket.send(JSON.stringify({ event: registerEvent, uuid: context }));
+        };
+        socket.onmessage = (message) => {
+          let event;
+          try {
+            event = JSON.parse(message.data);
+          } catch (err) {
+            return;
+          }
+          if (event.event === 'didReceiveSettings') {
+            settings = (event.payload && event.payload.settings) || {};
+            hydrate();
+          } else if (event.event === 'sendToPropertyInspector' && event.payload) {
+            if (event.payload.event === 'status') describe(event.payload);
+          }
+        };
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "name": "claudify-streamdeck",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stream Deck plugin showing a live count of running Claude Code agents",
+  "type": "module",
+  "scripts": {
+    "deps": "npm --prefix com.claudify.agents.sdPlugin/bin install",
+    "test": "node --test scripts/test.mjs",
+    "icons": "node scripts/icons.mjs",
+    "preview": "node scripts/preview.mjs",
+    "raster": "node scripts/rasterize.mjs",
+    "simulate": "node scripts/simulate.mjs",
+    "validate": "streamdeck validate com.claudify.agents.sdPlugin",
+    "pack": "streamdeck pack com.claudify.agents.sdPlugin --output build --force",
+    "install-plugin": "bash scripts/install.sh",
+    "dev-mode": "bash scripts/dev-mode.sh",
+    "logs": "bash scripts/logs.sh"
+  },
+  "devDependencies": {
+    "@elgato/cli": "^1.9.0"
+  }
+}
