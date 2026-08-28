@@ -312,6 +312,37 @@ test('the key face matches the state it is given', () => {
   assert.deepEqual(viewFor({ ok: false, error: 'wsl-asleep' }), { state: 'empty', value: '0' });
 });
 
+test('"only running" leaves the idle sessions out of the number', () => {
+  const running = { countMode: 'running' };
+  const mixed = { ok: true, total: 5, working: 2, blocked: 0, idle: 3 };
+
+  assert.equal(viewFor(mixed).value, '5', 'the default still counts every session');
+  assert.equal(viewFor(mixed, running).value, '2');
+  assert.equal(viewFor(mixed, running).state, 'working');
+
+  // An agent waiting on you has not finished, so it still counts as running --
+  // and it still colours the key amber.
+  const blocked = viewFor({ ok: true, total: 4, working: 1, blocked: 1, idle: 2 }, running);
+  assert.equal(blocked.value, '2');
+  assert.equal(blocked.state, 'blocked');
+
+  // Nothing running with sessions still open reads as empty, not as an idle
+  // count of 0: a bright white 0 would look like a reading.
+  const allIdle = viewFor({ ok: true, total: 3, working: 0, blocked: 0, idle: 3 }, running);
+  assert.deepEqual(allIdle, { state: 'empty', value: '0' });
+  assert.equal(viewFor({ ok: true, total: 3, working: 0, blocked: 0, idle: 3 }).state, 'idle');
+
+  // A broken probe says so whichever mode is on.
+  assert.deepEqual(viewFor({ ok: false, error: 'timeout' }, running), { state: 'error', value: '!' });
+});
+
+test('the count mode reaches the drawn frames', () => {
+  const summary = { ok: true, total: 4, working: 1, blocked: 0, idle: 3 };
+  const [all] = ringFrames(summary, { animate: false });
+  const [running] = ringFrames(summary, { animate: false, countMode: 'running' });
+  assert.notEqual(all, running, 'the two modes draw different numbers');
+});
+
 test('the face carries no text but the number', () => {
   const svg = renderKey({ state: 'working', value: '2', spin: true });
   assert.equal(svg.match(/<text/g).length, 1);
@@ -375,6 +406,9 @@ test('settings are clamped and defaulted', () => {
   assert.equal(normalize({ interval: 99999 }).interval, 3600);
   assert.equal(normalize({ interval: 'nonsense' }).interval, 30);
   assert.equal(normalize({ scope: 'made-up' }).scope, 'all');
+  assert.equal(normalize({}).countMode, 'all');
+  assert.equal(normalize({ countMode: 'running' }).countMode, 'running');
+  assert.equal(normalize({ countMode: 'made-up' }).countMode, 'all');
   assert.equal(normalize({ distro: '  Ubuntu  ' }).distro, 'Ubuntu');
   assert.equal(normalize(null).pressAction, 'focus');
   assert.equal(normalize({ pressAction: 'made-up' }).pressAction, 'focus');
@@ -398,6 +432,11 @@ test('probe key ignores scope, since scope is applied after the probe', () => {
   assert.equal(
     probeKey(normalize({ scope: 'all', distro: 'Ubuntu' })),
     probeKey(normalize({ scope: 'bg', distro: 'Ubuntu' })),
+  );
+  assert.equal(
+    probeKey(normalize({ countMode: 'all' })),
+    probeKey(normalize({ countMode: 'running' })),
+    'the count mode is a drawing choice, not a different reading',
   );
   assert.notEqual(probeKey(normalize({ distro: 'Ubuntu' })), probeKey(normalize({ distro: 'Debian' })));
 });

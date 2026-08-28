@@ -119,8 +119,15 @@ export function renderKey(view, phase = 0, options = {}) {
   );
 }
 
-/** Map a summary from classify.js onto the key face. */
-export function viewFor(summary) {
+/**
+ * Map a summary from classify.js onto the key face.
+ *
+ * `countMode: 'running'` drops the idle sessions from the number -- an open
+ * terminal you have finished with is a session, not an agent at work. The
+ * colour is unaffected: it has always come from the states present, never from
+ * the number, so a lone blocked agent is still amber whichever mode is on.
+ */
+export function viewFor(summary, settings = {}) {
   if (!summary.ok) {
     // Skipped, not broken: don't raise a red flag over a poll that
     // deliberately declined to wake a sleeping WSL distro.
@@ -129,12 +136,17 @@ export function viewFor(summary) {
   }
 
   const { total, working, blocked } = summary;
+  const onlyRunning = settings.countMode === 'running';
+  const value = String(onlyRunning ? working + blocked : total);
 
   // Blocked wins: an agent waiting on you is the one fact worth interrupting for.
-  if (blocked > 0) return { state: 'blocked', value: String(total) };
-  if (working > 0) return { state: 'working', value: String(total), spin: true };
-  if (total === 0) return { state: 'empty', value: '0' };
-  return { state: 'idle', value: String(total) };
+  if (blocked > 0) return { state: 'blocked', value };
+  if (working > 0) return { state: 'working', value, spin: true };
+  // Nothing running. In 'running' mode that is the whole story even with idle
+  // sessions open, and the key should read as dim as an empty one -- a bright
+  // white 0 would look like a reading rather than an absence.
+  if (total === 0 || onlyRunning) return { state: 'empty', value: '0' };
+  return { state: 'idle', value };
 }
 
 const frameCache = new Map();
@@ -145,7 +157,7 @@ const frameCache = new Map();
  * count and the look, so they are rendered once and replayed.
  */
 export function ringFrames(summary, settings = {}) {
-  const view = viewFor(summary);
+  const view = viewFor(summary, settings);
   const spin = Boolean(view.spin) && settings.animate !== false;
   const thickness = settings.thickness ?? 'normal';
   const showMark = settings.showMark !== false;

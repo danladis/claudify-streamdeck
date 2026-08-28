@@ -10,6 +10,8 @@ export const DEFAULTS = {
   cwdFilter: '',
   /** 'all' | 'bg' | 'interactive' */
   scope: 'all',
+  /** What the number on the ring key means: see COUNT_MODES. */
+  countMode: 'all',
   /** Seconds between refreshes. */
   interval: 30,
   /** Spin the ring, or set Clawd moving, while agents are working. */
@@ -57,6 +59,19 @@ const CLAWD_ANIMATIONS = new Set(['wiggle', 'scuttle', 'shimmy', 'wave', 'jump',
 
 const TRANSPORTS = new Set(['auto', 'wsl', 'local']);
 const SCOPES = new Set(['all', 'bg', 'interactive']);
+
+/**
+ * What the ring key's number counts.
+ *
+ *   all      every session in scope, idle ones included -- the default, and
+ *            the only honest answer to "how many Claude sessions are open".
+ *   running  only the sessions that are not idle: working, plus the ones
+ *            parked waiting on you. A session you have finished with but left
+ *            open is not doing anything, and this mode does not count it.
+ *
+ * Only the ring key draws a number, so this setting does nothing on the mascot.
+ */
+const COUNT_MODES = new Set(['all', 'running']);
 const PRESS_ACTIONS = new Set(['focus', 'agentView', 'refresh', 'custom']);
 const THICKNESSES = new Set(['hairline', 'thin', 'normal', 'thick', 'heavy']);
 const BACKGROUNDS = new Set(['blue', 'gray', 'transparent']);
@@ -75,6 +90,7 @@ export function normalize(raw) {
     claudeBin: str(settings.claudeBin, DEFAULTS.claudeBin),
     cwdFilter: str(settings.cwdFilter, DEFAULTS.cwdFilter),
     scope: oneOf(settings.scope, SCOPES, DEFAULTS.scope),
+    countMode: oneOf(settings.countMode, COUNT_MODES, DEFAULTS.countMode),
     // Under 5s just hammers the CLI for no benefit; over an hour is
     // indistinguishable from "off".
     interval: Number.isFinite(interval)

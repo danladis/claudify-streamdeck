@@ -213,6 +213,19 @@
       </div>
     </div>
 
+    <div id="countModeRow">
+      <div class="row">
+        <label for="countMode">Show</label>
+        <div class="control">
+          <select id="countMode">
+            <option value="all">All of them</option>
+            <option value="running">Only running</option>
+          </select>
+        </div>
+      </div>
+      <div class="hint">"Only running" leaves out idle sessions, so the key counts just the agents at work or waiting on you.</div>
+    </div>
+
     <div class="row">
       <label for="cwdFilter">Folder</label>
       <div class="control">
@@ -368,6 +381,7 @@
       const FIELDS = {
         interval: { node: 'interval', kind: 'number' },
         scope: { node: 'scope', kind: 'text' },
+        countMode: { node: 'countMode', kind: 'text' },
         cwdFilter: { node: 'cwdFilter', kind: 'text' },
         animate: { node: 'animate', kind: 'bool' },
         speed: { node: 'speed', kind: 'text' },
@@ -386,6 +400,7 @@
       const DEFAULTS = {
         interval: 30,
         scope: 'all',
+        countMode: 'all',
         cwdFilter: '',
         animate: true,
         speed: 'normal',
@@ -429,6 +444,9 @@
         // The mascot key has no ring to style.
         const isMascot = action === MASCOT;
         el('ringRows').hidden = isMascot;
+        // Only the ring key draws a number, so only it can leave idle sessions
+        // out of one.
+        el('countModeRow').hidden = isMascot;
         // Each key styles only its own face, and neither speed nor move is
         // worth showing while the face is holding still.
         el('mascotRows').hidden = !isMascot || !el('animate').checked;

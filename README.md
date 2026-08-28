@@ -60,12 +60,24 @@ The agent keys take a refresh interval, what counts as an agent, which face and
 animation, what a press does, and how to reach Claude Code (auto-detects WSL on
 Windows).
 
+By default the Agent Count key shows every open session. Set **Show** to **Only
+running** and the number drops the idle ones, leaving just the agents at work or
+waiting on you — the colours are unchanged, so a lone blocked agent is still
+amber.
+
 The usage keys take a refresh interval, the percentages the colours change at,
 which window and reset format the single-window key shows, and — under
 **Where the credentials are** — an override if your credentials file is
 somewhere unusual. Leave that blank: the login is read from
 `~/.claude/.credentials.json`, or from the login Keychain on macOS, where Claude
 Code writes no file. Naming a path there turns the Keychain lookup off.
+
+If the path you name is inside WSL (`\\wsl.localhost\…`), the key checks that
+WSL is already running before it opens the file — reading it otherwise would
+start the distro. A timed refresh that finds WSL stopped keeps the last numbers
+on the key, or shows **WSL Asleep** if it has none yet; pressing the key, or the
+panel's **Refresh**, reads it regardless. This is the same restraint the agent
+keys show when they probe through WSL.
 
 Every key can be **transparent**, **blue** or **gray**; transparent is the
 default and lets the key show Stream Deck's own black.
