@@ -289,7 +289,9 @@ class UsageKey {
     this.frames = USAGE_FACES[action] ?? barsFrames;
     this.settings = normalizeUsage(rawSettings);
     this.snapshot = null;
-    this.refresh();
+    // As on the agent keys: a key merely appearing is not a request, so it
+    // must not be what starts a stopped WSL distro. See getUsage's allowWake.
+    this.refresh({ allowWake: false });
   }
 
   applySettings(rawSettings) {
@@ -324,12 +326,13 @@ class UsageKey {
   #schedule() {
     if (this.#destroyed) return;
     clearTimeout(this.#timer);
-    this.#timer = setTimeout(() => this.refresh(), this.#tickMs());
+    // A timer tick is passive too -- see the constructor.
+    this.#timer = setTimeout(() => this.refresh({ allowWake: false }), this.#tickMs());
     // A pending refresh should never be the reason the process stays alive.
     this.#timer.unref?.();
   }
 
-  async refresh({ force = false } = {}) {
+  async refresh({ force = false, allowWake = true } = {}) {
     if (this.#destroyed) return;
     clearTimeout(this.#timer);
 
@@ -342,6 +345,7 @@ class UsageKey {
       thresholds: thresholdsFor(settings),
       ttlMs: settings.interval * 1000,
       force,
+      allowWake,
       log: (message) => sd.log(message),
     });
     if (this.#destroyed || generation !== this.#generation) return;
@@ -413,9 +417,12 @@ sd.on('propertyInspectorDidAppear', ({ context }) => {
 });
 
 sd.on('sendToPlugin', ({ context, payload }) => {
+  // The panel's Refresh button is a request, so it is allowed to wake WSL.
   // force is the usage keys' word for "skip the TTL"; an agent key has no TTL
   // to skip and ignores it.
-  if (payload?.command === 'refresh') keys.get(context)?.refresh({ force: true });
+  if (payload?.command === 'refresh') {
+    keys.get(context)?.refresh({ force: true, allowWake: true });
+  }
 });
 
 sd.on('socketError', (err) => {

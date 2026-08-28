@@ -41,6 +41,7 @@ const SEVERITY = {
   // The failure statuses are decided before this map is consulted; ranking them
   // above the bands means that if one ever does flow through, it still wins.
   stale: 4,
+  wslAsleep: 4,
   auth: 5,
   rateLimited: 5,
   error: 5,

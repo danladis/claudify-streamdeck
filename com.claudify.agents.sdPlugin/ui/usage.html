@@ -265,7 +265,9 @@
       </div>
       <div class="hint">
         Leave blank. Claude Code's own login is read from ~/.claude/.credentials.json, or from the
-        login Keychain on macOS. Naming a file here turns that off.
+        login Keychain on macOS. Naming a file here turns that off. A path inside WSL
+        (\\wsl.localhost\…) is only read while WSL is already running: a timed refresh will not
+        start it, and the key waits instead of waking it.
       </div>
     </details>
 
@@ -351,6 +353,10 @@
         error: 'Could not reach the usage endpoint.',
       };
 
+      // Not trouble: the file lives inside WSL, WSL is stopped, and a timed
+      // refresh declined to start it. Pressing Refresh does start it.
+      const SKIPPED = 'WSL is not running, so the file was left alone. Press Refresh to read it anyway.';
+
       function percent(window) {
         return window && window.usedPercent !== null && window.usedPercent !== undefined
           ? window.usedPercent + '%'
@@ -370,6 +376,14 @@
         const list = el('windows');
 
         list.innerHTML = '';
+
+        if (status.status === 'wslAsleep') {
+          dot.className = 'dot warn';
+          text.textContent = 'WSL is asleep';
+          detail.textContent = status.error || SKIPPED;
+          detail.hidden = false;
+          return;
+        }
 
         if (TROUBLE[status.status]) {
           dot.className = 'dot bad';
@@ -391,9 +405,12 @@
         dot.className = 'dot ' + (worst >= 90 ? 'bad' : worst >= 70 ? 'warn' : 'ok');
         text.textContent = status.stale ? 'Last known reading' : 'Up to date';
 
-        detail.textContent = status.stale && status.staleReason === 'rateLimited'
-          ? 'A refresh was skipped: Claude is throttling. The numbers below still stand.'
-          : '';
+        detail.textContent =
+          status.stale && status.staleReason === 'rateLimited'
+            ? 'A refresh was skipped: Claude is throttling. The numbers below still stand.'
+            : status.stale && status.staleReason === 'wslAsleep'
+              ? 'A refresh was skipped: WSL is not running. The numbers below still stand.'
+              : '';
         detail.hidden = !detail.textContent;
 
         for (const [name, window] of [['5H', status.session], ['7D', status.weekly]]) {

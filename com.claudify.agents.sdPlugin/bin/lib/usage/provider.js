@@ -8,6 +8,7 @@
  * a snapshot with a status instead of an exception. The cache in front of this
  * decides whether the pipeline runs at all.
  */
+import { isWslPath, isWslVmAsleep } from '../wsl.js';
 import { fetchUsage, refreshToken } from './api.js';
 import { sharedCache } from './cache.js';
 import { isExpired, readCredentials } from './credentials.js';
@@ -19,6 +20,7 @@ const DEFAULT_DEPS = {
   readCredentials,
   refreshToken,
   fetchUsage,
+  isWslVmAsleep,
   now: Date.now,
 };
 
@@ -68,6 +70,8 @@ async function runPipeline({ credentialsPath, thresholds, deps, log }) {
  * @param {{warning: number, critical: number}} [options.thresholds]
  * @param {number} [options.ttlMs] How long a reading stays fresh.
  * @param {boolean} [options.force] A key press: skip the TTL, within reason.
+ * @param {boolean} [options.allowWake] False for the passive polls (a timer
+ *   tick, a key appearing): those must not start a stopped WSL distro.
  * @param {(message: string) => void} [options.log]
  * @param {object} [options.deps] Test seam.
  * @returns {Promise<object>} Always a snapshot, never a rejection.
@@ -77,11 +81,32 @@ export async function getUsage({
   thresholds = DEFAULT_THRESHOLDS,
   ttlMs,
   force = false,
+  allowWake = true,
   log = () => {},
   cache = sharedCache(credentialsPath, ttlMs),
   deps: overrides,
 } = {}) {
   const deps = { ...DEFAULT_DEPS, ...overrides };
+
+  // A file named inside a distro (\\wsl.localhost\Ubuntu\...) is reached over
+  // WSL's own 9P server, so merely opening it starts a stopped distro -- the
+  // same accident the agent keys' probe guards against, and the reason a
+  // passive poll asks first. Auto-detect never goes near WSL: that path is
+  // always on the host itself.
+  if (!allowWake && isWslPath(credentialsPath)) {
+    const asleep = await deps.isWslVmAsleep(log);
+    // Logged either way, so the log proves the check ran rather than only
+    // showing up when it already agrees with what we expect.
+    log(
+      asleep
+        ? '[claude-usage] no WSL VM running -- skipping this poll instead of starting one'
+        : '[claude-usage] a WSL VM is running -- reading the file',
+    );
+    if (asleep) {
+      return { ...cache.skip('wslAsleep', 'WSL is not running, so the file was left alone.'), thresholds };
+    }
+  }
+
   const snapshot = await cache.get(
     () => runPipeline({ credentialsPath, thresholds, deps, log }),
     { force },

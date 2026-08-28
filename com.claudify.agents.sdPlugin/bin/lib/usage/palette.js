@@ -28,6 +28,9 @@ export const ACCENTS = {
   critical: '#fb923c',
   limited: '#f87171',
   stale: TEXT_MUTED,
+  // Skipped, not broken -- the same reasoning the agent keys' sleeping Clawd
+  // follows: a poll that declined to wake WSL is no cause for a red frame.
+  wslAsleep: TEXT_MUTED,
   auth: '#fbbf24',
   rateLimited: '#fb923c',
   error: '#f87171',
@@ -76,11 +79,16 @@ export function messageLines(status) {
       return ['Claude', 'Login', 'Required'];
     case 'rateLimited':
       return ['Claude', 'Rate', 'Limited'];
+    case 'wslAsleep':
+      return ['WSL', 'Asleep'];
     default:
       return ['Claude', 'Error'];
   }
 }
 
-/** True when a status has nothing worth drawing a bar or a ring for. */
+/**
+ * True when a status has nothing worth drawing a bar or a ring for -- because
+ * it failed, or, for 'wslAsleep', because it never went and looked.
+ */
 export const isFailure = (status) =>
-  status === 'auth' || status === 'rateLimited' || status === 'error';
+  status === 'auth' || status === 'rateLimited' || status === 'error' || status === 'wslAsleep';

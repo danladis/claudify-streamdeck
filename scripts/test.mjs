@@ -13,6 +13,7 @@ const LIB = join(
 );
 
 const { parseSections } = await import(join(LIB, 'probe.js'));
+const { isWslPath } = await import(join(LIB, 'wsl.js'));
 const { summarize } = await import(join(LIB, 'classify.js'));
 const {
   viewFor,
@@ -1056,6 +1057,135 @@ test('the pipeline never throws -- a key always has something to draw', async ()
     },
   });
   assert.equal(snapshot.status, 'error');
+});
+
+/* --------------------------------------------------------- WSL-hosted ---- */
+
+/** A path Windows resolves through the distro's own file server. */
+const WSL_PATH = '\\\\wsl.localhost\\Ubuntu\\home\\me\\creds.json';
+
+test('a UNC path into a distro is recognised, and a host path is not', () => {
+  assert.equal(isWslPath(WSL_PATH), true);
+  assert.equal(isWslPath('\\\\wsl$\\Ubuntu\\home\\me\\creds.json'), true, 'older builds');
+  assert.equal(isWslPath('//wsl.localhost/Ubuntu/home/me/creds.json'), true, 'Windows takes these too');
+  assert.equal(isWslPath('  \\\\WSL.LOCALHOST\\Ubuntu\\x  '), true);
+
+  assert.equal(isWslPath('C:\\Users\\me\\creds.json'), false);
+  assert.equal(isWslPath('/home/me/creds.json'), false);
+  // A share that merely sounds alike is somebody else's server, not a distro.
+  assert.equal(isWslPath('\\\\wslbackup\\share\\creds.json'), false);
+  assert.equal(isWslPath(''), false);
+  assert.equal(isWslPath(undefined), false);
+});
+
+test('a passive poll does not open a file that lives inside a stopped distro', async () => {
+  let reads = 0;
+  const snapshot = await getUsage({
+    credentialsPath: WSL_PATH,
+    allowWake: false,
+    cache: new UsageCache({ ttlMs: 0 }),
+    deps: {
+      isWslVmAsleep: async () => true,
+      readCredentials: async () => {
+        reads += 1;
+        return fakeCredentials;
+      },
+      now: () => 1000,
+    },
+  });
+
+  // Opening the path is what would start WSL, so the test is that nothing did.
+  assert.equal(reads, 0);
+  assert.equal(snapshot.status, 'wslAsleep');
+});
+
+test('a press reads it anyway, and a running VM never stands in the way', async () => {
+  const attempt = (options, asleep) =>
+    getUsage({
+      credentialsPath: WSL_PATH,
+      cache: new UsageCache({ ttlMs: 0 }),
+      deps: {
+        isWslVmAsleep: async () => asleep,
+        readCredentials: async () => fakeCredentials,
+        fetchUsage: async () => ({ five_hour: { utilization: 10 } }),
+        now: () => 1000,
+      },
+      ...options,
+    });
+
+  // A key press is a request: it is allowed to start the distro.
+  assert.equal((await attempt({ force: true }, true)).status, 'ok');
+  // WSL already up: there is nothing left to protect.
+  assert.equal((await attempt({ allowWake: false }, false)).status, 'ok');
+});
+
+test('an auto-detected path never pays for a WSL check', async () => {
+  let checks = 0;
+  const snapshot = await getUsage({
+    allowWake: false,
+    cache: new UsageCache({ ttlMs: 0 }),
+    deps: {
+      isWslVmAsleep: async () => {
+        checks += 1;
+        return true;
+      },
+      readCredentials: async () => fakeCredentials,
+      fetchUsage: async () => ({ five_hour: { utilization: 10 } }),
+      now: () => 1000,
+    },
+  });
+
+  assert.equal(checks, 0, 'the default path is on the host, never in a distro');
+  assert.equal(snapshot.status, 'ok');
+});
+
+test('a skipped poll keeps the last good numbers and costs the next one nothing', async () => {
+  const clock = fakeClock();
+  const cache = new UsageCache({ ttlMs: 60000, now: clock.now });
+  const deps = {
+    isWslVmAsleep: async () => true,
+    readCredentials: async () => fakeCredentials,
+    fetchUsage: async () => ({ five_hour: { utilization: 42 } }),
+    now: clock.now,
+  };
+
+  assert.equal((await getUsage({ credentialsPath: WSL_PATH, cache, deps })).session.usedPercent, 42);
+
+  clock.advance(120000);
+  const skipped = await getUsage({ credentialsPath: WSL_PATH, allowWake: false, cache, deps });
+  assert.equal(skipped.status, 'stale');
+  assert.equal(skipped.staleReason, 'wslAsleep');
+  assert.equal(skipped.session.usedPercent, 42, 'real numbers stand until better ones arrive');
+
+  // The skip was not an attempt, so the press right behind it -- with no time
+  // passing at all -- is not held off by the force throttle.
+  let fetches = 0;
+  await getUsage({
+    credentialsPath: WSL_PATH,
+    force: true,
+    cache,
+    deps: {
+      ...deps,
+      fetchUsage: async () => {
+        fetches += 1;
+        return { five_hour: { utilization: 43 } };
+      },
+    },
+  });
+  assert.equal(fetches, 1);
+});
+
+test('a skipped poll reads as skipped on the key, not as a failure', () => {
+  const asleep = usageSnapshot({
+    status: 'wslAsleep',
+    session: { usedPercent: null, resetAt: null },
+    weekly: { usedPercent: null, resetAt: null },
+  });
+
+  for (const svg of [renderBars(asleep), renderGauge(asleep)]) {
+    assert.ok(svg.includes('WSL') && svg.includes('Asleep'), 'the face says why');
+    assert.ok(!svg.includes('#f87171'), 'and does not cry error red');
+  }
 });
 
 test('a Retry-After is read in seconds, and nonsense is ignored', () => {

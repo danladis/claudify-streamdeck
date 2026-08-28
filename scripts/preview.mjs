@@ -159,6 +159,7 @@ const USAGE_STATES = {
   'no data': usageSnapshot(null, null),
   'login required': usageSnapshot(null, null, { status: 'auth' }),
   'rate limited': usageSnapshot(null, null, { status: 'rateLimited' }),
+  'wsl asleep': usageSnapshot(null, null, { status: 'wslAsleep' }),
 };
 
 const barsTiles = Object.entries(USAGE_STATES)

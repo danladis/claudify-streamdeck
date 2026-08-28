@@ -58,6 +58,15 @@ export class UsageCache {
     return this.#last;
   }
 
+  /**
+   * The face for a poll that was deliberately not made -- see the WSL check in
+   * provider.js. Nothing was attempted, so neither the TTL nor the force
+   * throttle moves: the next tick, or the next press, still gets a real try.
+   */
+  skip(status, message) {
+    return this.#staleOr(emptySnapshot(status, { message, now: new Date(this.#now()) }), status);
+  }
+
   async get(fetcher, { force = false } = {}) {
     const now = this.#now();
     const fresh = this.#last !== null && now - this.#lastFetchedAt < this.#ttlMs;
