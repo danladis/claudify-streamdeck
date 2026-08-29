@@ -1,6 +1,6 @@
 /**
- * What the usage faces are made of: the colours, the font, and the face both
- * fall back to when there are no numbers to show.
+ * What the usage faces are made of: the colours, the font, and the faces they
+ * fall back to when the numbers are missing or no longer being confirmed.
  *
  * Adapted from stream-deck-ai-limits (MIT, (c) 2026 David Utyuganov), recoloured
  * to match the agent keys so a deck holding both does not look like two plugins.
@@ -21,17 +21,16 @@ export const TEXT_MUTED = '#8b8fa3';
  */
 export const TRACK = '#2f2f45';
 
+/** The greyed-out face: see isDimmed. The grey is the agent keys' own. */
+export const DIM_ACCENT = '#4b5563';
+export const DIM_TEXT = '#6f7484';
+
 /** One colour per band, shared with the agent keys' states. */
 export const ACCENTS = {
   ok: '#4ade80',
   warning: '#fbbf24',
   critical: '#fb923c',
   limited: '#f87171',
-  stale: TEXT_MUTED,
-  // Skipped, not broken -- the same reasoning the agent keys' sleeping Clawd
-  // follows: a poll that declined to wake WSL is no cause for a red frame.
-  wslAsleep: TEXT_MUTED,
-  auth: '#fbbf24',
   rateLimited: '#fb923c',
   error: '#f87171',
 };
@@ -48,15 +47,23 @@ export function text(x, baseline, value, { size = 22, weight = 'bold', fill = TE
 }
 
 /**
- * The corner dot that marks a reading as stale. Deliberately small: the numbers
- * under it are the real last-known-good ones, and greying the whole key over a
- * transient rate-limit window would overstate the problem.
+ * True when the face should be drawn dim rather than in its band colours.
+ *
+ * Three things land here, and none of them is a broken reading: a login that has
+ * expired, a WSL distro that was left asleep, and any reading re-served from the
+ * cache after the refresh behind it failed. The shape of the key is still right
+ * in all three -- what is on it has simply stopped being confirmed -- so it
+ * fades rather than being replaced by a message or flagged with a corner dot.
+ * That is the same restraint the agent keys show when a poll declines to wake
+ * WSL: skipped is not broken, and should not look like it.
  */
-export const staleDot = () => `<circle cx="${SIZE - 12}" cy="12" r="3.5" fill="${TEXT_MUTED}"/>`;
+export const isDimmed = (snapshot) =>
+  snapshot.stale === true || snapshot.status === 'auth' || snapshot.status === 'wslAsleep';
 
 /**
- * The face for a status that has no numbers behind it: a framed message. The
- * frame carries the colour, so the words can stay legible.
+ * The face for a status that has no numbers behind it and no dimmed face to
+ * fall back on: a framed message. The frame carries the colour, so the words
+ * can stay legible.
  */
 export function messageFace(lines, status, background) {
   const accent = accentFor(status);
@@ -74,21 +81,11 @@ export function messageFace(lines, status, background) {
 
 /** The words for each failure. Short enough to read at a glance on a key. */
 export function messageLines(status) {
-  switch (status) {
-    case 'auth':
-      return ['Claude', 'Login', 'Required'];
-    case 'rateLimited':
-      return ['Claude', 'Rate', 'Limited'];
-    case 'wslAsleep':
-      return ['WSL', 'Asleep'];
-    default:
-      return ['Claude', 'Error'];
-  }
+  return status === 'rateLimited' ? ['Claude', 'Rate', 'Limited'] : ['Claude', 'Error'];
 }
 
 /**
- * True when a status has nothing worth drawing a bar or a ring for -- because
- * it failed, or, for 'wslAsleep', because it never went and looked.
+ * True when the request was refused or went wrong -- the failures worth spending
+ * the whole key on words for. The quieter ones dim instead; see isDimmed.
  */
-export const isFailure = (status) =>
-  status === 'auth' || status === 'rateLimited' || status === 'error' || status === 'wslAsleep';
+export const isFailure = (status) => status === 'rateLimited' || status === 'error';

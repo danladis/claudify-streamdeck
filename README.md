@@ -75,9 +75,9 @@ Code writes no file. Naming a path there turns the Keychain lookup off.
 If the path you name is inside WSL (`\\wsl.localhost\…`), the key checks that
 WSL is already running before it opens the file — reading it otherwise would
 start the distro. A timed refresh that finds WSL stopped keeps the last numbers
-on the key, or shows **WSL Asleep** if it has none yet; pressing the key, or the
-panel's **Refresh**, reads it regardless. This is the same restraint the agent
-keys show when they probe through WSL.
+on the key and greys it out, so you can see the reading is no longer being
+confirmed; pressing the key, or the panel's **Refresh**, reads it regardless.
+This is the same restraint the agent keys show when they probe through WSL.
 
 Every key can be **transparent**, **blue** or **gray**; transparent is the
 default and lets the key show Stream Deck's own black.
@@ -87,8 +87,10 @@ default and lets the key show Stream Deck's own black.
 The usage endpoint throttles hard — roughly five requests per five minutes,
 then a 429 with a long `Retry-After` — so a minute is the floor on the refresh
 interval, and every usage key on the deck shares one reading. When a refresh
-does fail, the key keeps showing the last good numbers with a small dot in the
-corner rather than blanking.
+does fail, the key keeps showing the last good numbers, greyed out, rather than
+blanking. An expired login greys the key the same way — the Property Inspector
+says which it is. Only a refused or broken request takes the key over with a
+message.
 
 ## Development
 

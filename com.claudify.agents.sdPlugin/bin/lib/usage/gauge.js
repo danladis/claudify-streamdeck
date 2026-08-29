@@ -9,7 +9,18 @@
  */
 import { CENTER, SIZE, svgDocument, toDataUri } from '../canvas.js';
 import { DEFAULT_THRESHOLDS, statusForPercent } from './snapshot.js';
-import { TEXT_MUTED, TRACK, accentFor, isFailure, messageFace, messageLines, staleDot, text } from './palette.js';
+import {
+  DIM_ACCENT,
+  DIM_TEXT,
+  TEXT_MUTED,
+  TRACK,
+  accentFor,
+  isDimmed,
+  isFailure,
+  messageFace,
+  messageLines,
+  text,
+} from './palette.js';
 import { formatCountdown, formatResetTime } from './time.js';
 
 const RADIUS = 46;
@@ -73,18 +84,25 @@ export function renderGauge(snapshot, settings = {}, now = new Date()) {
     return messageFace(messageLines(snapshot.status), snapshot.status, background);
   }
 
+  const dim = isDimmed(snapshot);
   const usage = which === 'weekly' ? snapshot.weekly : snapshot.session;
-  if (usage.usedPercent === null) return messageFace(['Claude', 'No Data'], 'error', background);
+  const known = usage.usedPercent !== null;
+  // A dimmed key keeps its ring and says '--' inside it; only a key that is
+  // otherwise fine and still has no number has something to explain in words.
+  if (!known && !dim) return messageFace(['Claude', 'No Data'], 'error', background);
 
-  const percent = Math.max(0, Math.min(100, Math.round(usage.usedPercent)));
-  const accent = accentFor(statusForPercent(percent, snapshot.thresholds ?? DEFAULT_THRESHOLDS));
+  const percent = known ? Math.max(0, Math.min(100, Math.round(usage.usedPercent))) : 0;
+  const accent = dim
+    ? DIM_ACCENT
+    : accentFor(statusForPercent(percent, snapshot.thresholds ?? DEFAULT_THRESHOLDS));
+  const muted = dim ? DIM_TEXT : TEXT_MUTED;
   const lines = resetLines(usage, settings, now);
 
   // The ring rides up as lines appear beneath it, so the whole face stays
   // optically centred instead of drifting to the top of the key.
   const cy = lines.length === 2 ? 60 : lines.length === 1 ? 66 : 74;
   // Three digits need to fit inside the ring, so 100% gets a smaller face.
-  const size = percent >= 100 ? 26 : 32;
+  const size = known && percent >= 100 ? 26 : 32;
 
   const captionY = SIZE - (lines.length === 2 ? 26 : 12);
   const caption = lines
@@ -92,7 +110,7 @@ export function renderGauge(snapshot, settings = {}, now = new Date()) {
       text(CENTER, captionY + i * 15, line, {
         size: 13,
         weight: '600',
-        fill: TEXT_MUTED,
+        fill: muted,
         anchor: 'middle',
       }),
     )
@@ -105,12 +123,12 @@ export function renderGauge(snapshot, settings = {}, now = new Date()) {
       // the ring -- the same trick render.js uses for the agent count.
       `<text x="${CENTER}" y="${Math.round(cy + 0.358 * size)}" text-anchor="middle" ` +
       `font-family="Arial, Helvetica, 'DejaVu Sans', sans-serif" font-size="${size}" ` +
-      `font-weight="bold" fill="${accent}">${percent}` +
-      `<tspan font-size="${Math.round(size * 0.5)}">%</tspan></text>` +
+      `font-weight="bold" fill="${accent}">` +
+      (known ? `${percent}<tspan font-size="${Math.round(size * 0.5)}">%</tspan>` : '--') +
+      `</text>` +
       // The window's name sits in the ring's open bottom.
-      text(CENTER, cy + RADIUS - 1, label, { size: 14, fill: TEXT_MUTED, anchor: 'middle' }) +
-      caption +
-      (snapshot.stale ? staleDot() : ''),
+      text(CENTER, cy + RADIUS - 1, label, { size: 14, fill: muted, anchor: 'middle' }) +
+      caption,
     background,
   );
 }

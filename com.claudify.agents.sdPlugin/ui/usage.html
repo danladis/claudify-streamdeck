@@ -357,6 +357,15 @@
       // refresh declined to start it. Pressing Refresh does start it.
       const SKIPPED = 'WSL is not running, so the file was left alone. Press Refresh to read it anyway.';
 
+      // A key holding numbers it can no longer confirm just goes grey, so this
+      // panel is the only place that says why. Every reason gets a line.
+      const STALE = {
+        rateLimited: 'A refresh was skipped: Claude is throttling. The numbers below still stand.',
+        wslAsleep: 'A refresh was skipped: WSL is not running. The numbers below still stand.',
+        auth: 'The last refresh failed: log in with Claude Code again. The numbers below still stand.',
+        error: 'The last refresh failed. The numbers below still stand.',
+      };
+
       function percent(window) {
         return window && window.usedPercent !== null && window.usedPercent !== undefined
           ? window.usedPercent + '%'
@@ -405,12 +414,7 @@
         dot.className = 'dot ' + (worst >= 90 ? 'bad' : worst >= 70 ? 'warn' : 'ok');
         text.textContent = status.stale ? 'Last known reading' : 'Up to date';
 
-        detail.textContent =
-          status.stale && status.staleReason === 'rateLimited'
-            ? 'A refresh was skipped: Claude is throttling. The numbers below still stand.'
-            : status.stale && status.staleReason === 'wslAsleep'
-              ? 'A refresh was skipped: WSL is not running. The numbers below still stand.'
-              : '';
+        detail.textContent = status.stale ? STALE[status.staleReason] || STALE.error : '';
         detail.hidden = !detail.textContent;
 
         for (const [name, window] of [['5H', status.session], ['7D', status.weekly]]) {

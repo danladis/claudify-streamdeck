@@ -1214,16 +1214,21 @@ test('a skipped poll keeps the last good numbers and costs the next one nothing'
   assert.equal(fetches, 1);
 });
 
-test('a skipped poll reads as skipped on the key, not as a failure', () => {
-  const asleep = usageSnapshot({
-    status: 'wslAsleep',
-    session: { usedPercent: null, resetAt: null },
-    weekly: { usedPercent: null, resetAt: null },
-  });
+test('a skipped poll and a spent login dim the key rather than replacing it', () => {
+  // Neither is a broken reading, so neither takes the key over with a message:
+  // the face keeps its shape and goes grey. See palette.js's isDimmed.
+  for (const status of ['wslAsleep', 'auth']) {
+    const snapshot = usageSnapshot({
+      status,
+      session: { usedPercent: null, resetAt: null },
+      weekly: { usedPercent: null, resetAt: null },
+    });
 
-  for (const svg of [renderBars(asleep), renderGauge(asleep)]) {
-    assert.ok(svg.includes('WSL') && svg.includes('Asleep'), 'the face says why');
-    assert.ok(!svg.includes('#f87171'), 'and does not cry error red');
+    for (const svg of [renderBars(snapshot), renderGauge(snapshot, { window: 'session' })]) {
+      assert.match(svg, />--</, `${status}: the face keeps its shape, with nothing in it`);
+      assert.ok(!svg.includes('#f87171'), `${status}: and does not cry error red`);
+      assert.ok(!/>(WSL|Login|No Data)</.test(svg), `${status}: no message takes the key over`);
+    }
   }
 });
 
@@ -1293,16 +1298,24 @@ test('nothing in either window is an error, not a pair of empty bars', () => {
 });
 
 test('the failures each say what to do about them', () => {
-  assert.match(renderBars(usageSnapshot({ status: 'auth' })), />Login</);
   assert.match(renderBars(usageSnapshot({ status: 'rateLimited' })), />Rate</);
   assert.match(renderBars(usageSnapshot({ status: 'error' })), />Error</);
 });
 
-test('a stale reading is marked, but keeps its numbers and its colours', () => {
-  const svg = renderBars(usageSnapshot({ stale: true }));
-  assert.match(svg, />42%</, 'the last known numbers still show');
-  assert.match(svg, /<circle cx="132" cy="12"/, 'with a dot in the corner');
-  assert.ok(!renderBars(usageSnapshot()).includes('<circle'), 'and no dot when fresh');
+test('numbers that are no longer being confirmed are dimmed, not dotted', () => {
+  const stale = usageSnapshot({ status: 'stale', stale: true, staleReason: 'wslAsleep' });
+
+  const bars = renderBars(stale);
+  assert.match(bars, />42%</, 'the last known numbers still show');
+  assert.ok(!bars.includes('#4ade80'), 'but not in their band colour');
+  assert.match(bars, /#4b5563/, 'they are greyed out instead');
+  assert.ok(!bars.includes('<circle'), 'and nothing is flagged in the corner');
+
+  const gauge = renderGauge(stale, { window: 'session', resetInfo: 'countdown' });
+  assert.match(gauge, />42</);
+  assert.ok(!gauge.includes('#4ade80'));
+
+  assert.match(renderBars(usageSnapshot()), /#4ade80/, 'a fresh reading keeps its colours');
 });
 
 test('the ring fills three quarters of a turn at 100%, and is a stub at 1%', () => {

@@ -155,7 +155,7 @@ const USAGE_STATES = {
   warming: usageSnapshot(74, 55),
   critical: usageSnapshot(93, 88),
   spent: usageSnapshot(100, 96),
-  stale: usageSnapshot(42, 68, { stale: true }),
+  stale: usageSnapshot(42, 68, { status: 'stale', stale: true, staleReason: 'error' }),
   'no data': usageSnapshot(null, null),
   'login required': usageSnapshot(null, null, { status: 'auth' }),
   'rate limited': usageSnapshot(null, null, { status: 'rateLimited' }),
