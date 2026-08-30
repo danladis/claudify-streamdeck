@@ -4,6 +4,8 @@ import { probe } from './lib/probe.js';
 import { summarize, errorHint } from './lib/classify.js';
 import { ringFrames, spinFrameMs } from './lib/render.js';
 import { clawdFrames, clawdFrameMs, pickRandomMove } from './lib/clawd.js';
+import { FinishWatcher } from './lib/finished.js';
+import { partyFrames, PARTY_FRAME_MS, PARTY_MS } from './lib/party.js';
 import { agentViewCommand, focusTerminal, openInTerminal, runDetached } from './lib/launch.js';
 import { barsFrames } from './lib/usage/bars.js';
 import { gaugeFrames } from './lib/usage/gauge.js';
@@ -13,10 +15,18 @@ import { normalize as normalizeUsage, thresholdsFor } from './lib/usage/settings
 /**
  * The two keys differ only in what they draw: both poll the same way, classify
  * the same way, and press the same way.
+ *
+ * `party` is the exception: a face may also have something it does for a moment
+ * when an agent finishes, in front of whatever it was drawing. Only Clawd does
+ * -- a ring that broke into confetti would stop being a gauge.
  */
 const FACES = {
   'com.claudify.agents.count': { frames: ringFrames, frameMs: spinFrameMs },
-  'com.claudify.agents.mascot': { frames: clawdFrames, frameMs: clawdFrameMs },
+  'com.claudify.agents.mascot': {
+    frames: clawdFrames,
+    frameMs: clawdFrameMs,
+    party: { frames: partyFrames, frameMs: PARTY_FRAME_MS, ms: PARTY_MS },
+  },
 };
 
 const DEFAULT_ACTION = 'com.claudify.agents.count';
@@ -68,6 +78,9 @@ class AgentKey {
   #frameMs = 0;
   #resolvedMove = null;
   #lastMove = null;
+  #finishes = new FinishWatcher();
+  #partyTimer = null;
+  #partying = false;
 
   constructor(context, action, rawSettings) {
     this.context = context;
@@ -94,6 +107,9 @@ class AgentKey {
     this.#generation += 1;
     clearTimeout(this.#timer);
     this.#timer = null;
+    clearTimeout(this.#partyTimer);
+    this.#partyTimer = null;
+    this.#partying = false;
     this.#stopSpinning();
   }
 
@@ -126,6 +142,45 @@ class AgentKey {
     this.render();
     this.pushToInspector();
     this.#schedule();
+
+    // Only a face with a party has any use for the answer, and only when the
+    // setting is on -- so the watcher is left unread otherwise, and switching
+    // the setting back on starts from a fresh reading instead of firing over
+    // everything that finished while nobody was looking.
+    if (this.face.party && settings.celebrate) {
+      const finished = this.#finishes.observe(summary);
+      if (finished > 0) {
+        sd.log(`[claude-agents] ${finished} agent(s) finished -- confetti`);
+        this.#celebrate();
+      }
+    }
+  }
+
+  /**
+   * Two seconds of confetti, then straight back to whatever the key was
+   * showing. Nothing about the key's actual state changes here: the burst is
+   * drawn in front of it, and the next render after it ends picks up the
+   * current reading -- which by then may well have moved on again.
+   */
+  #celebrate() {
+    if (this.#destroyed) return;
+
+    clearTimeout(this.#partyTimer);
+    this.#partying = true;
+    // Start of the burst, at the burst's own pace: both the frame it is on and
+    // the timer stepping through them belong to the face it is replacing.
+    this.#frameIndex = 0;
+    this.#stopSpinning();
+    this.render();
+
+    this.#partyTimer = setTimeout(() => {
+      this.#partyTimer = null;
+      this.#partying = false;
+      this.#frameIndex = 0;
+      this.#stopSpinning();
+      this.render();
+    }, this.face.party.ms);
+    this.#partyTimer.unref?.();
   }
 
   /**
@@ -154,7 +209,10 @@ class AgentKey {
     if (!summary) return;
 
     const settings = this.#settingsForFace();
-    const frames = this.face.frames(summary, settings);
+    // A poll landing mid-burst must not cut the party short: while it runs it
+    // is what the key draws, whatever the reading underneath it now says.
+    const party = this.#partying ? this.face.party : null;
+    const frames = party ? party.frames(settings) : this.face.frames(summary, settings);
     // Keep the spinner where it is across a poll: only a change in frame count
     // means a different kind of face, and only then should it jump to the start.
     if (this.#frames?.length !== frames.length) this.#frameIndex = 0;
@@ -164,7 +222,7 @@ class AgentKey {
 
     // A change of speed or of animation changes the interval, and setInterval
     // will not take a new one -- so the timer is replaced rather than kept.
-    const frameMs = this.face.frameMs(settings);
+    const frameMs = party ? party.frameMs : this.face.frameMs(settings);
     if (frameMs !== this.#frameMs) this.#stopSpinning();
     this.#frameMs = frameMs;
 

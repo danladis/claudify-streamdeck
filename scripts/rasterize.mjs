@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
  * Rasterises the SVG the faces emit, so a key can be looked at instead of
- * trusted. Deliberately narrow: it understands only the shapes render.js and
- * clawd.js actually produce -- rect, circle, and paths of M/Q/A/Z.
+ * trusted. Deliberately narrow: it understands only the shapes render.js,
+ * clawd.js and party.js actually produce -- rect, circle, and paths of
+ * M/L/Q/A/Z.
  *
  * <text> is not rendered; its slot is marked with a faint bar. The number is
  * already proven on the device, and a font rasteriser is not worth carrying.
@@ -59,7 +60,7 @@ function flattenArc(points, from, to, radius, largeArc, sweep) {
 
 /** Path data to a list of point runs. */
 function flattenPath(d) {
-  const tokens = d.match(/[MQAZ]|-?[\d.]+/g) ?? [];
+  const tokens = d.match(/[MLQAZ]|-?[\d.]+/g) ?? [];
   const runs = [];
   let run = [];
   let cursor = [0, 0];
@@ -71,6 +72,9 @@ function flattenPath(d) {
       if (run.length > 1) runs.push(run);
       cursor = [num(tokens[i++]), num(tokens[i++])];
       run = [cursor];
+    } else if (op === 'L') {
+      cursor = [num(tokens[i++]), num(tokens[i++])];
+      run.push(cursor);
     } else if (op === 'Q') {
       const [cx, cy] = [num(tokens[i++]), num(tokens[i++])];
       const [x, y] = [num(tokens[i++]), num(tokens[i++])];
@@ -245,6 +249,16 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     ]),
     ['clawd-scuttle-far', renderClawd(ANIMATIONS.scuttle.sequence[3], { body: CLAWD_BODY })],
   ];
+
+  // The celebration, every fourth frame: enough to see the horn go out and come
+  // back, and the confetti clear the key by the end.
+  const { partyFrames, PARTY_FRAME_MS } = await import(join(LIB, 'party.js'));
+  const partySvgs = partyFrames({}).map((uri) =>
+    Buffer.from(uri.slice('data:image/svg+xml;base64,'.length), 'base64').toString('utf8'),
+  );
+  for (let i = 0; i < partySvgs.length; i += 4) {
+    jobs.push([`party-${String(i * PARTY_FRAME_MS).padStart(4, '0')}ms`, partySvgs[i]]);
+  }
 
   for (const [name, svg] of jobs) {
     const file = join(OUT, `${name}.png`);

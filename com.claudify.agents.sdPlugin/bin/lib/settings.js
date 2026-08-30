@@ -20,6 +20,11 @@ export const DEFAULTS = {
   speed: 'normal',
   /** Which move Clawd makes on the mascot key: see ANIMATIONS in clawd.js. */
   clawdAnimation: 'random',
+  /**
+   * Let Clawd throw a two-second party -- horn and confetti -- each time an
+   * agent finishes its work. Mascot key only; the ring has nowhere to put it.
+   */
+  celebrate: true,
   /** Ring stroke weight: see THICKNESS in render.js. */
   thickness: 'normal',
   /** Show the Claude mark in the top-right corner of the ring key. */
@@ -99,6 +104,7 @@ export function normalize(raw) {
     animate: settings.animate !== false,
     speed: oneOf(settings.speed, new Set(Object.keys(SPEEDS)), DEFAULTS.speed),
     clawdAnimation: oneOf(settings.clawdAnimation, CLAWD_ANIMATIONS, DEFAULTS.clawdAnimation),
+    celebrate: settings.celebrate !== false,
     thickness: oneOf(settings.thickness, THICKNESSES, DEFAULTS.thickness),
     showMark: settings.showMark !== false,
     background: oneOf(settings.background, BACKGROUNDS, DEFAULTS.background),

@@ -94,6 +94,13 @@ const SPRITE_H = 2 * CELL_H + CELL_H / 2;
 const ORIGIN_Y = (SIZE - SPRITE_H) / 2;
 
 /**
+ * Where Clawd sits on the key, for anything that has to draw *at* him rather
+ * than on him -- the party horn in party.js hangs off these numbers so it stays
+ * at his mouth however the sprite is placed.
+ */
+export const LAYOUT = { ORIGIN_X, ORIGIN_Y, CELL_W, CELL_H, COLUMNS, ROWS };
+
+/**
  * Every sideways move is a whole quadrant, never less: half a cell is 6px, and
  * anything finer would put the sprite off its own pixel grid and blur it.
  */
@@ -317,9 +324,14 @@ function sleepMark() {
 
 /**
  * @param {{pose: string, offset?: number, x?: number, feet?: string, feetX?: number, poof?: string}} frame
- * @param {{body?: string, badge?: string, sleep?: boolean, background?: string}} [options]
+ * @param {{body?: string, badge?: string, sleep?: boolean, background?: string, extras?: string}} [options]
+ *        `extras` is markup drawn last, over Clawd -- props another face hands
+ *        him, rather than anything the pose table knows about.
  */
-export function renderClawd(frame, { body = CLAWD_BODY, badge = null, sleep = false, background } = {}) {
+export function renderClawd(
+  frame,
+  { body = CLAWD_BODY, badge = null, sleep = false, background, extras = '' } = {},
+) {
   const pose = POSES[frame.pose] ?? POSES.default;
   const stance = STANCES[frame.feet] ?? STANCES.tuck;
   const row = frame.offset ?? 0;
@@ -341,6 +353,7 @@ export function renderClawd(frame, { body = CLAWD_BODY, badge = null, sleep = fa
   if (frame.poof && row > 0) art += poof(frame.poof);
   if (badge) art += cornerDot(badge);
   if (sleep) art += sleepEyes(row, dx) + sleepMark();
+  art += extras;
 
   return svgDocument(art, background);
 }

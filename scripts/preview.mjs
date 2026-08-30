@@ -21,6 +21,7 @@ const { viewFor, renderKey, THICKNESS, SPIN_PERIOD_MS, SPIN_FRAME_MS } = await i
 const { clawdView, renderClawd, clawdFrameMs, ANIMATIONS, DEFAULT_ANIMATION } = await import(
   join(LIB, 'clawd.js'),
 );
+const { partyFrames, PARTY_FRAME_MS, PARTY_MS } = await import(join(LIB, 'party.js'));
 const { SPEEDS } = await import(join(LIB, 'settings.js'));
 const { renderBars } = await import(join(LIB, 'usage', 'bars.js'));
 const { renderGauge } = await import(join(LIB, 'usage', 'gauge.js'));
@@ -133,6 +134,26 @@ const speedTiles = Object.keys(SPEEDS)
       clawdFrameMs({ speed }),
     ),
   )
+  .join('\n');
+
+/* ---------------------------------------------------------- the party ---- */
+
+/** The party comes out ready for the deck; the page wants the markup back. */
+const decode = (frames) =>
+  frames.map((uri) =>
+    Buffer.from(uri.slice('data:image/svg+xml;base64,'.length), 'base64').toString('utf8'),
+  );
+
+const partyTiles = [
+  ...['transparent', 'blue', 'gray'].map((background) =>
+    tile(background, decode(partyFrames({ background })), PARTY_FRAME_MS),
+  ),
+  tile('animation off', decode(partyFrames({ animate: false })), PARTY_FRAME_MS),
+].join('\n');
+
+/** The same two seconds at every speed: only Clawd's own pace changes. */
+const partySpeedTiles = Object.keys(SPEEDS)
+  .map((speed) => tile(speed, decode(partyFrames({ speed })), PARTY_FRAME_MS))
   .join('\n');
 
 /* ---------------------------------------------------------- usage faces ---- */
@@ -253,6 +274,16 @@ ${moveTiles}
 <h2>Speed (the wiggle)</h2>
 <div class="grid">
 ${speedTiles}
+</div>
+
+<h2>The party &mdash; ${PARTY_MS / 1000}s when an agent finishes</h2>
+<div class="grid">
+${partyTiles}
+</div>
+
+<h2>The party at each speed &mdash; still ${PARTY_MS / 1000}s</h2>
+<div class="grid">
+${partySpeedTiles}
 </div>
 
 <h2>Usage &mdash; both windows</h2>

@@ -11,7 +11,7 @@ A Stream Deck plugin for keeping an eye on Claude Code. Four keys:
 | Key | Shows |
 | --- | --- |
 | **Agent Count** | A live count of your running agents, on a ring that spins while they work and turns amber when one is waiting on you |
-| **Clawd** | The same thing, as Claude Code's own mascot, wiggling along |
+| **Clawd** | The same thing, as Claude Code's own mascot, wiggling along — and throwing confetti each time an agent finishes |
 | **Usage Limits** | How much of your 5-hour and weekly Claude limits is spent, as two bars |
 | **Usage (one window)** | One of those limits, large, with the time it resets |
 
@@ -59,6 +59,15 @@ Stream Deck), and the defaults work if Claude Code is installed the usual way.
 The agent keys take a refresh interval, what counts as an agent, which face and
 animation, what a press does, and how to reach Claude Code (auto-detects WSL on
 Windows).
+
+When an agent finishes its work, Clawd blows a party horn and rains confetti for
+two seconds, then goes back to whatever the key was showing. He hops at the key's
+own **Speed**, but the two seconds are two seconds at every setting — the key has
+a real state to get back to. Finishing means a session that was busy and has
+stopped being busy, or a background job whose state file says it concluded
+successfully — an agent that stops to *wait on you* is not finished, and neither
+is one that failed. Turn it off with **Celebrate when an agent finishes**. A key
+set not to animate marks the moment with a single still frame instead.
 
 By default the Agent Count key shows every open session. Set **Show** to **Only
 running** and the number drops the idle ones, leaving just the agents at work or

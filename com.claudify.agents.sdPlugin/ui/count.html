@@ -258,6 +258,17 @@
       </div>
     </div>
 
+    <div id="celebrateRow">
+      <div class="row">
+        <label>&nbsp;</label>
+        <div class="control check">
+          <input id="celebrate" type="checkbox" />
+          <label for="celebrate">Celebrate when an agent finishes</label>
+        </div>
+      </div>
+      <div class="hint">Two seconds of party horn and confetti whenever an agent finishes its work -- not when one stops to wait on you.</div>
+    </div>
+
     <div id="speedRow" class="row">
       <label for="speed">Speed</label>
       <div class="control">
@@ -386,6 +397,7 @@
         animate: { node: 'animate', kind: 'bool' },
         speed: { node: 'speed', kind: 'text' },
         clawdAnimation: { node: 'clawdAnimation', kind: 'text' },
+        celebrate: { node: 'celebrate', kind: 'bool' },
         thickness: { node: 'thickness', kind: 'text' },
         showMark: { node: 'showMark', kind: 'bool' },
         background: { node: 'background', kind: 'text' },
@@ -405,6 +417,7 @@
         animate: true,
         speed: 'normal',
         clawdAnimation: 'random',
+        celebrate: true,
         thickness: 'normal',
         showMark: true,
         background: 'transparent',
@@ -450,6 +463,9 @@
         // Each key styles only its own face, and neither speed nor move is
         // worth showing while the face is holding still.
         el('mascotRows').hidden = !isMascot || !el('animate').checked;
+        // The party is Clawd's alone, but it is not one of his moves: it still
+        // marks the moment on a key that has been asked to hold still.
+        el('celebrateRow').hidden = !isMascot;
         el('speedRow').hidden = !el('animate').checked;
         el('animateLabel').textContent = isMascot
           ? 'Let Clawd move while agents are working'

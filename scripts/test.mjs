@@ -37,6 +37,8 @@ const {
   CLAWD_BODY,
   CLAWD_FRAME_MS,
 } = await import(join(LIB, 'clawd.js'));
+const { FinishWatcher } = await import(join(LIB, 'finished.js'));
+const { partyFrames, PARTY_MS, PARTY_FRAME_MS } = await import(join(LIB, 'party.js'));
 const { claudeMark } = await import(join(LIB, 'claudemark.js'));
 const { readFileSync } = await import('node:fs');
 const { CENTER, CORNER } = await import(join(LIB, 'canvas.js'));
@@ -217,6 +219,33 @@ test('a concluded background job does not count as an agent at all', () => {
   assert.equal(summary.working, 1);
   assert.equal(summary.idle, 0);
   assert.deepEqual(summary.agents.map((a) => a.sessionId), ['s1']);
+});
+
+test('a done job is reported as finished, on its way out of the count', () => {
+  const summary = summarize({
+    ok: true,
+    agents: [
+      agent({ sessionId: 's1', kind: 'background', status: 'idle' }),
+      agent({ sessionId: 's2', kind: 'background', status: 'busy' }),
+    ],
+    jobs: [
+      { sessionId: 's1', state: 'done', tempo: 'idle' },
+      { sessionId: 's2', state: 'working', tempo: 'active' },
+    ],
+  });
+  assert.deepEqual(summary.finished, ['s1'], 'the one that concluded, and only it');
+  assert.equal(summary.total, 1, 'still not counted as an agent');
+});
+
+test('a failed job finishes nothing', () => {
+  // Excluded from the count like a done one, but there is nothing to celebrate:
+  // it must not turn up in `finished` either.
+  const summary = summarize({
+    ok: true,
+    agents: [agent({ kind: 'background', status: 'idle' })],
+    jobs: [{ sessionId: 's1', state: 'failed', tempo: 'idle' }],
+  });
+  assert.deepEqual(summary.finished, []);
 });
 
 test('a failed job is excluded the same way as a done one', () => {
@@ -651,6 +680,171 @@ test('the Claude mark is a burst of twelve rays around a hub', () => {
   // Every point stays inside the mark's radius.
   for (const [, x, y] of mark.matchAll(/([\d.]+) ([\d.]+)/g)) {
     assert.ok(Math.hypot(Number(x) - 120, Number(y) - 24) <= 8.01, `${x},${y} outside`);
+  }
+});
+
+/* ----------------------------------------------------------- finishing ---- */
+
+/** A reading, as the watcher wants it: states by session, plus concluded jobs. */
+const reading = (states, finished = []) => ({
+  ok: true,
+  agents: Object.entries(states).map(([sessionId, state]) => ({ sessionId, state })),
+  finished,
+});
+
+test('the first reading only ever seeds the watcher', () => {
+  const watcher = new FinishWatcher();
+  // A deck starting up next to a pile of finished jobs is not an occasion.
+  assert.equal(watcher.observe(reading({ s1: 'idle' }, ['s2'])), 0);
+  assert.equal(watcher.observe(reading({ s1: 'idle' }, ['s2'])), 0, 'and nothing changed');
+});
+
+test('a finish is a session that stopped working, or a job that concluded', () => {
+  const watcher = new FinishWatcher();
+  watcher.observe(reading({ s1: 'working', s2: 'working', s3: 'blocked' }));
+  assert.equal(
+    watcher.observe(reading({ s1: 'idle', s2: 'working', s3: 'blocked' }, [])),
+    1,
+    'only s1 finished',
+  );
+
+  const jobs = new FinishWatcher();
+  jobs.observe(reading({ s1: 'working' }));
+  assert.equal(jobs.observe(reading({}, ['s1'])), 1, 'the job concluded');
+  assert.equal(jobs.observe(reading({}, ['s1'])), 0, 'and it stays concluded, quietly');
+});
+
+test('nothing else counts as finishing', () => {
+  const watcher = new FinishWatcher();
+  watcher.observe(reading({ blockedOne: 'blocked', busy: 'working', gone: 'working' }));
+  assert.equal(
+    watcher.observe(reading({ blockedOne: 'idle', busy: 'working', fresh: 'idle' })),
+    0,
+    'giving up waiting, still working, and appearing out of nowhere are all not finishing',
+  );
+});
+
+test('a session that vanishes never finished as far as anyone knows', () => {
+  const watcher = new FinishWatcher();
+  watcher.observe(reading({ s1: 'working' }));
+  // A closed terminal, or a WSL distro that went away: it never said how it ended.
+  assert.equal(watcher.observe(reading({})), 0);
+});
+
+test('a failed probe is not a reading, and does not end anything', () => {
+  const watcher = new FinishWatcher();
+  watcher.observe(reading({ s1: 'working' }));
+  assert.equal(watcher.observe({ ok: false, error: 'wsl-asleep' }), 0);
+  // The states it held on to are the ones from before the failure, so the
+  // finish is still spotted when the reading comes back.
+  assert.equal(watcher.observe(reading({ s1: 'idle' })), 1);
+});
+
+/* --------------------------------------------------------------- party ---- */
+
+/** The frames of a burst, as SVG rather than as the data URIs the deck gets. */
+const partySvgs = (settings = {}) =>
+  partyFrames(settings).map((uri) =>
+    Buffer.from(uri.slice('data:image/svg+xml;base64,'.length), 'base64').toString('utf8'),
+  );
+
+/** Every filled path in a frame, as [points, fill]. */
+const paths = (svg) =>
+  [...svg.matchAll(/<path d="([^"]+)" fill="([^"]+)"\/>/g)].map(([, d, fill]) => [
+    [...d.matchAll(/(?:M|L) (-?[\d.]+) (-?[\d.]+)/g)].map(([, x, y]) => [Number(x), Number(y)]),
+    fill,
+  ]);
+
+const HORN_COLOURS = ['#f4b942', '#f87171'];
+const isHorn = ([, fill]) => HORN_COLOURS.includes(fill);
+
+test('the party lasts exactly two seconds, however it is sliced', () => {
+  const frames = partyFrames({});
+  assert.equal(PARTY_MS, 2000);
+  assert.equal(frames.length * PARTY_FRAME_MS, PARTY_MS);
+  assert.equal(new Set(frames).size, frames.length, 'no frame is drawn twice');
+});
+
+test("the jump keeps the key's own speed, and the two seconds keep theirs", () => {
+  // A hop is a crouch that was not there on the frame before -- the puffs mark
+  // one. Faster settings fit more of them into the same burst.
+  const hops = (speed) => {
+    let count = 0;
+    let crouched = false;
+    for (const svg of partySvgs({ speed })) {
+      const now = svg.includes('#5c6070');
+      if (now && !crouched) count += 1;
+      crouched = now;
+    }
+    return count;
+  };
+
+  const bySpeed = Object.keys(SPEEDS).map(hops);
+  for (let i = 1; i < bySpeed.length; i += 1) {
+    // SPEEDS is ordered slowest first.
+    assert.ok(bySpeed[i] > bySpeed[i - 1], `${bySpeed} is not ordered by speed`);
+  }
+
+  // What speed must not touch: the burst is two seconds at every one of them,
+  // because the key goes back to its real state when it ends.
+  for (const speed of Object.keys(SPEEDS)) {
+    assert.equal(partyFrames({ speed }).length * PARTY_FRAME_MS, PARTY_MS, speed);
+  }
+  // Which move the key is set to is not a speed: the party is always the jump.
+  assert.deepEqual(partyFrames({ clawdAnimation: 'scuttle' }), partyFrames({}));
+});
+
+test('a key told not to animate still marks the moment, with one frame', () => {
+  assert.equal(partyFrames({ animate: false }).length, 1);
+  // Backgrounds, speeds and stillness must not share a cache entry.
+  assert.notEqual(partyFrames({ background: 'blue' })[0], partyFrames({})[0]);
+  assert.notEqual(partyFrames({ animate: false })[0], partyFrames({})[0]);
+  assert.notDeepEqual(partyFrames({ speed: 'crawl' }), partyFrames({ speed: 'frantic' }));
+  // A still frame has no pace to take from the setting.
+  assert.deepEqual(partyFrames({ animate: false, speed: 'crawl' }), partyFrames({ animate: false }));
+});
+
+test('the horn goes out and comes back, and stays inside the card', () => {
+  const svgs = partySvgs();
+  assert.ok(
+    svgs.some((svg) => paths(svg).some(isHorn)),
+    'the horn is blown',
+  );
+  assert.ok(
+    svgs.some((svg) => svg.includes('stroke="#f4b942"')),
+    'and rolled back up between blows',
+  );
+
+  for (const svg of svgs) {
+    for (const [points] of paths(svg).filter(isHorn)) {
+      for (const [x, y] of points) {
+        assert.ok(x >= 3 && x <= 141, `horn x=${x} past the card edge`);
+        assert.ok(y >= 3 && y <= 141, `horn y=${y} past the card edge`);
+      }
+    }
+  }
+});
+
+test('the confetti rains down and is gone by the end', () => {
+  const svgs = partySvgs();
+  // Confetti falls in from above the key and leaves through the bottom, so only
+  // its sideways drift is bounded -- and only loosely: a piece may clip an edge,
+  // it just must not be drawn somewhere nobody can see it.
+  const confetti = (svg) => paths(svg).filter((path) => !isHorn(path));
+  const lowest = (svg) =>
+    Math.max(...confetti(svg).flatMap(([points]) => points.map(([, y]) => y)), -20);
+
+  assert.ok(lowest(svgs[3]) < lowest(svgs[10]), 'the rain comes down');
+  assert.ok(lowest(svgs[10]) < lowest(svgs[20]), 'and keeps coming down');
+  // Whatever is still in the air when the burst ends is at the very bottom, so
+  // the key does not snap back to Clawd with confetti hanging over his head.
+  const last = confetti(svgs[svgs.length - 1]).flatMap(([points]) => points.map(([, y]) => y));
+  assert.ok(Math.min(...last) > 100, 'nothing left up top');
+
+  for (const svg of svgs) {
+    for (const [points] of confetti(svg)) {
+      for (const [x] of points) assert.ok(x > -10 && x < 154, `a piece at x=${x} is off the key`);
+    }
   }
 });
 

@@ -74,7 +74,8 @@ function jobConcluded(job) {
 }
 
 /**
- * @returns {{ok: true, total: number, working: number, blocked: number, idle: number, agents: object[]}}
+ * @returns {{ok: true, total: number, working: number, blocked: number, idle: number,
+ *            agents: object[], finished: string[]}}
  *          on success, or {ok: false, error, detail} when the probe failed.
  */
 export function summarize(response, { scope = 'all' } = {}) {
@@ -92,12 +93,19 @@ export function summarize(response, { scope = 'all' } = {}) {
   }
 
   const agents = [];
+  // The sessions jobConcluded drops, kept as bare ids for anyone watching for
+  // the moment a job ends -- but only the ones that ended in success. A failed
+  // job is left out entirely: it is neither running nor worth celebrating.
+  const finished = [];
   for (const agent of Array.isArray(response.agents) ? response.agents : []) {
     if (!agent || typeof agent !== 'object') continue;
     if (!inScope(agent, scope)) continue;
 
     const job = jobsBySession.get(agent.sessionId);
-    if (jobConcluded(job)) continue;
+    if (jobConcluded(job)) {
+      if (agent.sessionId && String(job.state).toLowerCase() === 'done') finished.push(agent.sessionId);
+      continue;
+    }
 
     const status = normalizeStatus(agent.status);
 
@@ -124,6 +132,7 @@ export function summarize(response, { scope = 'all' } = {}) {
     blocked: count('blocked'),
     idle: count('idle'),
     agents,
+    finished,
   };
 }
 
