@@ -61,9 +61,9 @@ animation, what a press does, and how to reach Claude Code (auto-detects WSL on
 Windows).
 
 When an agent finishes its work, Clawd blows a party horn and rains confetti for
-two seconds, then goes back to whatever the key was showing. He hops at the key's
-own **Speed**, but the two seconds are two seconds at every setting — the key has
-a real state to get back to. Finishing means a session that was busy and has
+two and a half seconds, then goes back to whatever the key was showing. He hops
+at the key's own **Speed**, but the burst is the same length at every setting —
+the key has a real state to get back to. Finishing means a session that was busy and has
 stopped being busy, or a background job whose state file says it concluded
 successfully — an agent that stops to *wait on you* is not finished, and neither
 is one that failed. Turn it off with **Celebrate when an agent finishes**. A key

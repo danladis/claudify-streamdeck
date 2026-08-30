@@ -1,5 +1,5 @@
 /**
- * Clawd's two seconds of celebration, for when an agent finishes its work.
+ * Clawd's moment of celebration, for when an agent finishes its work.
  *
  * He jumps -- Claude Code's own DANCE, so the hop is the one Clawd already
  * knows -- while blowing a paper party horn that unrolls and rolls back up,
@@ -11,7 +11,8 @@
  * pushed one at a time (see canvas.js): the SVG itself never animates. Unlike
  * the other moves, though, the burst is a fixed number of frames at a fixed
  * interval: the speed setting cannot be allowed to stretch or squeeze it,
- * because "two seconds" is the point of it.
+ * because PARTY_MS -- long enough to notice, short enough not to be in the way
+ * -- is the point of it.
  *
  * What the speed setting does move is Clawd himself. Every frame here is a
  * moment in time rather than a step in a sequence, so the hop and the horn are
@@ -24,7 +25,7 @@ import { ANIMATIONS, CLAWD_BODY, DANCE, LAYOUT, renderClawd } from './clawd.js';
 import { speedFactor } from './settings.js';
 
 /** How long a celebration lasts, and how often it pushes a frame. */
-export const PARTY_MS = 2000;
+export const PARTY_MS = 2500;
 export const PARTY_FRAME_MS = 50;
 const FRAMES = PARTY_MS / PARTY_FRAME_MS;
 
@@ -216,8 +217,8 @@ function horn(elapsed, pose, dy) {
  * The hop is sampled from the clock rather than stepped through, so a slow
  * setting holds each pose across several frames and a fast one passes several
  * poses between frames. The confetti still counts in frames: it is falling on
- * the key, not dancing on it, and the two seconds it takes to clear are the
- * same two seconds whatever Clawd is doing underneath.
+ * the key, not dancing on it, and it takes the same time to blow through and
+ * clear whatever Clawd is doing underneath.
  */
 function renderParty(t, pose, background) {
   const elapsed = t * PARTY_FRAME_MS;
@@ -256,7 +257,7 @@ export function partyFrames(settings = {}) {
 
 /**
  * How often the burst pushes a frame. Fixed, unlike every other face here: the
- * speed setting moves Clawd within the two seconds (see poseMs), it does not
- * get to decide how long the two seconds are.
+ * speed setting moves Clawd within the burst (see poseMs), it does not get to
+ * decide how long the burst is.
  */
 export const partyFrameMs = () => PARTY_FRAME_MS;

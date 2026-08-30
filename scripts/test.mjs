@@ -389,11 +389,15 @@ test('rendered SVG is well formed and escapes its text', () => {
 
 test('still faces draw a ring appropriate to their state', () => {
   // Blocked and error ring the whole circle; idle and empty show only the track.
-  const strokes = (svg) => svg.match(/stroke="#[0-9a-f]{6}"/g);
+  const strokes = (svg) => svg.match(/stroke="#[0-9a-f]{6}"/g) ?? [];
   assert.ok(renderKey({ state: 'blocked', value: '3' }).includes('stroke="#fbbf24"'));
   assert.ok(renderKey({ state: 'error', value: '!' }).includes('stroke="#f87171"'));
-  assert.equal(strokes(renderKey({ state: 'empty', value: '0' })).length, 2, 'card edge + track only');
-  assert.equal(strokes(renderKey({ state: 'idle', value: '2' })).length, 2);
+  // The card and the number are fills, so the ring's own track is the only
+  // stroke a face that is not ringing has any business drawing.
+  const TRACK = 'stroke="#242438"';
+  assert.deepEqual(strokes(renderKey({ state: 'empty', value: '0' })), [TRACK]);
+  assert.deepEqual(strokes(renderKey({ state: 'idle', value: '2' })), [TRACK]);
+  assert.deepEqual(strokes(renderKey({ state: 'blocked', value: '3' })), [TRACK, 'stroke="#fbbf24"']);
 });
 
 test('the spinner is a partial arc that moves between frames', () => {
@@ -444,11 +448,25 @@ test('settings are clamped and defaulted', () => {
   assert.equal(normalize({ pressAction: 'agentView' }).pressAction, 'agentView');
   assert.equal(normalize({}).speed, 'normal');
   assert.equal(normalize({ speed: 'ludicrous' }).speed, 'normal');
-  assert.equal(normalize({ speed: 'crawl' }).speed, 'crawl');
-  assert.equal(normalize({}).clawdAnimation, 'wiggle');
-  assert.equal(normalize({ clawdAnimation: 'breakdance' }).clawdAnimation, 'wiggle');
+  assert.equal(normalize({ speed: 'slow' }).speed, 'slow');
+  assert.equal(normalize({}).clawdAnimation, 'random');
+  assert.equal(normalize({ clawdAnimation: 'breakdance' }).clawdAnimation, 'random');
   assert.equal(normalize({ clawdAnimation: 'scuttle' }).clawdAnimation, 'scuttle');
   assert.equal(normalize({ clawdAnimation: 'random' }).clawdAnimation, 'random');
+});
+
+test('a key saved under an old speed name keeps its pace', () => {
+  // The names changed; what the user picked did not. Only 'crawl', 'brisk' and
+  // 'frantic' can be migrated -- 'slow' is a name in both scales and means
+  // something different in each, so it is read as the one that exists now.
+  for (const [saved, expected] of [
+    ['crawl', 'slow'],
+    ['brisk', 'fast'],
+    ['frantic', 'fast'],
+  ]) {
+    assert.equal(normalize({ speed: saved }).speed, expected, saved);
+    assert.equal(speedFactor(normalize({ speed: saved }).speed), SPEEDS[expected]);
+  }
 });
 
 test('transport auto resolves per platform', () => {
@@ -618,14 +636,16 @@ test('every animation stays on the pixel grid and inside the card', () => {
 });
 
 test('speed scales every face, and never asks for an impossible frame rate', () => {
-  assert.equal(speedFactor('normal'), 1);
-  assert.equal(speedFactor('made-up'), 1);
-  assert.equal(clawdFrameMs({ clawdAnimation: 'jump' }), CLAWD_FRAME_MS);
-  assert.equal(spinFrameMs({}), SPIN_FRAME_MS);
+  assert.equal(speedFactor('made-up'), SPEEDS.normal, 'an unknown name runs at the default');
+  // 'normal' stretches each face's authored pace rather than being it: the
+  // sources these are taken from move quicker than a key on a desk should.
+  assert.ok(SPEEDS.normal > 1, 'the default is a stretch, not a passthrough');
+  assert.equal(clawdFrameMs({ clawdAnimation: 'jump' }), Math.round(CLAWD_FRAME_MS * SPEEDS.normal));
+  assert.equal(spinFrameMs({}), Math.round(SPIN_FRAME_MS * SPEEDS.normal));
 
   for (const ms of [clawdFrameMs, spinFrameMs]) {
-    assert.ok(ms({ speed: 'crawl' }) > ms({ speed: 'normal' }), 'crawl is slower');
-    assert.ok(ms({ speed: 'frantic' }) < ms({ speed: 'normal' }), 'frantic is faster');
+    assert.ok(ms({ speed: 'slow' }) > ms({ speed: 'normal' }), 'slow is slower');
+    assert.ok(ms({ speed: 'fast' }) < ms({ speed: 'normal' }), 'fast is faster');
     for (const speed of Object.keys(SPEEDS)) assert.ok(ms({ speed }) >= 20, `${speed} too fast`);
   }
 });
@@ -758,14 +778,14 @@ const paths = (svg) =>
 const HORN_COLOURS = ['#f4b942', '#f87171'];
 const isHorn = ([, fill]) => HORN_COLOURS.includes(fill);
 
-test('the party lasts exactly two seconds, however it is sliced', () => {
+test('the party lasts exactly as long as it says, however it is sliced', () => {
   const frames = partyFrames({});
-  assert.equal(PARTY_MS, 2000);
+  assert.equal(PARTY_MS, 2500);
   assert.equal(frames.length * PARTY_FRAME_MS, PARTY_MS);
   assert.equal(new Set(frames).size, frames.length, 'no frame is drawn twice');
 });
 
-test("the jump keeps the key's own speed, and the two seconds keep theirs", () => {
+test("the jump keeps the key's own speed, and the burst keeps its own length", () => {
   // A hop is a crouch that was not there on the frame before -- the puffs mark
   // one. Faster settings fit more of them into the same burst.
   const hops = (speed) => {
@@ -785,8 +805,8 @@ test("the jump keeps the key's own speed, and the two seconds keep theirs", () =
     assert.ok(bySpeed[i] > bySpeed[i - 1], `${bySpeed} is not ordered by speed`);
   }
 
-  // What speed must not touch: the burst is two seconds at every one of them,
-  // because the key goes back to its real state when it ends.
+  // What speed must not touch: the burst is the same length at every one of
+  // them, because the key goes back to its real state when it ends.
   for (const speed of Object.keys(SPEEDS)) {
     assert.equal(partyFrames({ speed }).length * PARTY_FRAME_MS, PARTY_MS, speed);
   }
@@ -799,9 +819,9 @@ test('a key told not to animate still marks the moment, with one frame', () => {
   // Backgrounds, speeds and stillness must not share a cache entry.
   assert.notEqual(partyFrames({ background: 'blue' })[0], partyFrames({})[0]);
   assert.notEqual(partyFrames({ animate: false })[0], partyFrames({})[0]);
-  assert.notDeepEqual(partyFrames({ speed: 'crawl' }), partyFrames({ speed: 'frantic' }));
+  assert.notDeepEqual(partyFrames({ speed: 'slow' }), partyFrames({ speed: 'fast' }));
   // A still frame has no pace to take from the setting.
-  assert.deepEqual(partyFrames({ animate: false, speed: 'crawl' }), partyFrames({ animate: false }));
+  assert.deepEqual(partyFrames({ animate: false, speed: 'slow' }), partyFrames({ animate: false }));
 });
 
 test('the horn goes out and comes back, and stays inside the card', () => {

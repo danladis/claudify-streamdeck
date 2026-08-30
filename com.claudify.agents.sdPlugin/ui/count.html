@@ -266,18 +266,16 @@
           <label for="celebrate">Celebrate when an agent finishes</label>
         </div>
       </div>
-      <div class="hint">Two seconds of party horn and confetti whenever an agent finishes its work -- not when one stops to wait on you.</div>
+      <div class="hint">Two and a half seconds of party horn and confetti whenever an agent finishes its work -- not when one stops to wait on you.</div>
     </div>
 
     <div id="speedRow" class="row">
       <label for="speed">Speed</label>
       <div class="control">
         <select id="speed">
-          <option value="crawl">Crawl</option>
           <option value="slow">Slow</option>
           <option value="normal">Normal</option>
-          <option value="brisk">Brisk</option>
-          <option value="frantic">Frantic</option>
+          <option value="fast">Fast</option>
         </select>
       </div>
     </div>
@@ -429,10 +427,16 @@
         claudeBin: '',
       };
 
+      // Speeds that used to have other names. Kept in step with RENAMED_SPEEDS
+      // in settings.js: without it the panel would show a key saved under an
+      // old name as blank, and save that blankness back over its setting.
+      const RENAMED_SPEEDS = { crawl: 'slow', brisk: 'fast', frantic: 'fast' };
+
       function hydrate() {
         for (const [key, field] of Object.entries(FIELDS)) {
           const node = el(field.node);
-          const value = settings[key] !== undefined ? settings[key] : DEFAULTS[key];
+          let value = settings[key] !== undefined ? settings[key] : DEFAULTS[key];
+          if (key === 'speed') value = RENAMED_SPEEDS[value] || value;
           if (field.kind === 'bool') node.checked = value !== false;
           else node.value = String(value);
         }

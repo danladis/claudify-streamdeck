@@ -157,7 +157,7 @@ class AgentKey {
   }
 
   /**
-   * Two seconds of confetti, then straight back to whatever the key was
+   * A burst of confetti, then straight back to whatever the key was
    * showing. Nothing about the key's actual state changes here: the burst is
    * drawn in front of it, and the next render after it ends picks up the
    * current reading -- which by then may well have moved on again.

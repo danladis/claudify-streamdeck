@@ -151,7 +151,7 @@ const partyTiles = [
   tile('animation off', decode(partyFrames({ animate: false })), PARTY_FRAME_MS),
 ].join('\n');
 
-/** The same two seconds at every speed: only Clawd's own pace changes. */
+/** The same burst at every speed: only Clawd's own pace changes. */
 const partySpeedTiles = Object.keys(SPEEDS)
   .map((speed) => tile(speed, decode(partyFrames({ speed })), PARTY_FRAME_MS))
   .join('\n');

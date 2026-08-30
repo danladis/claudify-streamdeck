@@ -21,7 +21,7 @@ export const DEFAULTS = {
   /** Which move Clawd makes on the mascot key: see ANIMATIONS in clawd.js. */
   clawdAnimation: 'random',
   /**
-   * Let Clawd throw a two-second party -- horn and confetti -- each time an
+   * Let Clawd throw a party -- horn and confetti, for PARTY_MS -- each time an
    * agent finishes its work. Mascot key only; the ring has nowhere to put it.
    */
   celebrate: true,
@@ -42,18 +42,33 @@ export const DEFAULTS = {
 /**
  * Animation speed, as a multiplier on each face's own frame interval. Higher is
  * slower: a face's base pace is what its author picked, and this stretches or
- * squeezes it. The extremes stay watchable -- 'crawl' still moves, and 'frantic'
- * stops short of asking the deck for a frame faster than it can draw one.
+ * squeezes it.
+ *
+ * 'normal' is not 1, and that is the point: every face was written at the pace
+ * its own source moves at -- Claude Code's 60ms jump, a 1.2s revolution -- and
+ * on a key, sitting on a desk in the corner of your eye, that reads as
+ * agitated. The default stretches all of it, and the three settings are one
+ * step either side of that.
  */
 export const SPEEDS = {
-  crawl: 2.6,
-  slow: 1.6,
-  normal: 1,
-  brisk: 0.65,
-  frantic: 0.42,
+  slow: 2.6,
+  normal: 1.6,
+  // A nudge rather than a different animal: 1.6 / 1.23 is 30% more frames a
+  // second than 'normal', which is enough to read as livelier without the key
+  // turning into something that pulls your eye off what you were doing.
+  fast: 1.23,
 };
 
 export const speedFactor = (name) => SPEEDS[name] ?? SPEEDS.normal;
+
+/**
+ * Speeds that used to have other names, so a key saved under one keeps the pace
+ * it was set to instead of silently falling back to the default. 'slow' is
+ * deliberately absent: it is a live name now, and there is no telling an old
+ * saved 'slow' from one picked today -- so the name wins and that one key gets
+ * slower.
+ */
+const RENAMED_SPEEDS = { crawl: 'slow', brisk: 'fast', frantic: 'fast' };
 
 /**
  * Clawd's moves, named here so settings can be validated without importing the
@@ -102,7 +117,11 @@ export function normalize(raw) {
       ? Math.min(3600, Math.max(5, Math.round(interval)))
       : DEFAULTS.interval,
     animate: settings.animate !== false,
-    speed: oneOf(settings.speed, new Set(Object.keys(SPEEDS)), DEFAULTS.speed),
+    speed: oneOf(
+      RENAMED_SPEEDS[settings.speed] ?? settings.speed,
+      new Set(Object.keys(SPEEDS)),
+      DEFAULTS.speed,
+    ),
     clawdAnimation: oneOf(settings.clawdAnimation, CLAWD_ANIMATIONS, DEFAULTS.clawdAnimation),
     celebrate: settings.celebrate !== false,
     thickness: oneOf(settings.thickness, THICKNESSES, DEFAULTS.thickness),
