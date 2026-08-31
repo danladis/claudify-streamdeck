@@ -1,17 +1,21 @@
-# Raise the terminal window a Claude Code session is running in.
+# Raise the window a Claude Code session is running in.
 #
-# Windows Terminal puts the active tab's title in its window title, and Claude
-# Code names a session after its task -- so the session names from
-# `claude agents --json` are usually enough to find the right window. Any
-# leftover terminal window is the fallback.
+# Each target is @{ Title; Process }, best first -- see launch.js's
+# focusTargets. Windows Terminal puts the active tab's title in its window
+# title and Claude Code names a session after its task; VS Code puts the
+# project folder in its window title, so a folder name against a `Code*`
+# process finds the right editor window. An empty Title takes any window of
+# that process. Any terminal window is the fallback -- unless every target
+# named another process, because raising some terminal when the press asked
+# for VS Code helps nobody.
 #
 # The script is handed over as -EncodedCommand rather than run from a path, so it
 # behaves the same whether the plugin sits on the Windows filesystem or is being
 # driven from WSL during development. `-Command -` cannot be used: it chokes on
-# the here-string below. launch.js substitutes the names list.
+# the here-string below. launch.js substitutes the targets list.
 #
 # Prints exactly one line: "raised: <title>", "failed: <title>", or "none".
-$Names = __NAMES__
+$Targets = __TARGETS__
 
 Add-Type @'
 using System;
@@ -61,15 +65,20 @@ $callback = [Fg+EnumProc] {
 }
 [void][Fg]::EnumWindows($callback, [IntPtr]::Zero)
 
-# A session name in the title is the strongest signal; a terminal process is the
-# fallback, ranked by how likely it is to be the one in use.
+# A target hit is the strongest signal; a terminal process is the fallback,
+# ranked by how likely it is to be the one in use.
 $target = $null
-foreach ($name in $Names) {
-  if (-not $name) { continue }
-  $target = $windows | Where-Object { $_.Title -like ('*' + $name + '*') } | Select-Object -First 1
+foreach ($t in $Targets) {
+  if ((-not $t.Title) -and (-not $t.Process)) { continue }
+  $target = $windows | Where-Object {
+    ((-not $t.Title) -or ($_.Title -like ('*' + $t.Title + '*'))) -and
+    ((-not $t.Process) -or ($_.Process -like $t.Process))
+  } | Select-Object -First 1
   if ($target) { break }
 }
-if (-not $target) {
+$wantsTerminal = ($Targets.Count -eq 0) -or
+  (@($Targets | Where-Object { -not $_.Process }).Count -gt 0)
+if ((-not $target) -and $wantsTerminal) {
   foreach ($terminal in $terminals) {
     $target = $windows | Where-Object { $_.Process -eq $terminal } | Select-Object -First 1
     if ($target) { break }

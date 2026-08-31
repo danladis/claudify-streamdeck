@@ -31,7 +31,7 @@ export const DEFAULTS = {
   showMark: true,
   /** Key background, shared by both faces: see BACKGROUNDS in canvas.js. */
   background: 'transparent',
-  /** 'focus' | 'agentView' | 'refresh' | 'custom' */
+  /** 'focus' | 'focusVsCode' | 'agentView' | 'refresh' | 'custom' */
   pressAction: 'focus',
   /** Shell command for pressAction 'custom', run on the Claude-side host. */
   customCommand: '',
@@ -92,7 +92,7 @@ const SCOPES = new Set(['all', 'bg', 'interactive']);
  * Only the ring key draws a number, so this setting does nothing on the mascot.
  */
 const COUNT_MODES = new Set(['all', 'running']);
-const PRESS_ACTIONS = new Set(['focus', 'agentView', 'refresh', 'custom']);
+const PRESS_ACTIONS = new Set(['focus', 'focusVsCode', 'agentView', 'refresh', 'custom']);
 const THICKNESSES = new Set(['hairline', 'thin', 'normal', 'thick', 'heavy']);
 const BACKGROUNDS = new Set(['blue', 'gray', 'transparent']);
 

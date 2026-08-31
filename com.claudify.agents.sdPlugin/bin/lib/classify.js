@@ -92,6 +92,11 @@ export function summarize(response, { scope = 'all' } = {}) {
     if (job?.sessionId) jobsBySession.set(job.sessionId, job);
   }
 
+  // The probe names the pids that live inside VS Code; everything else is
+  // assumed to sit in a terminal, which is also the safe reading on the hosts
+  // where the probe cannot tell (see probe-native's findVscodePids).
+  const vscodePids = new Set(Array.isArray(response.vscodePids) ? response.vscodePids : []);
+
   const agents = [];
   // The sessions jobConcluded drops, kept as bare ids for anyone watching for
   // the moment a job ends -- but only the ones that ended in success. A failed
@@ -118,6 +123,7 @@ export function summarize(response, { scope = 'all' } = {}) {
     agents.push({
       ...agent,
       state,
+      client: vscodePids.has(agent.pid) ? 'vscode' : 'terminal',
       needs: typeof job?.needs === 'string' ? job.needs.trim() : '',
     });
   }

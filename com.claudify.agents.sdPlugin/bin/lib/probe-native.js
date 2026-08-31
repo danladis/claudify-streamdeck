@@ -219,6 +219,73 @@ function runAgents(binary, settings, { platform, home }) {
 }
 
 /**
+ * Which of the listed sessions live inside VS Code -- the pids probe.sh's
+ * CLIENTS section would name, taken natively.
+ *
+ * On Linux the extension host stamps its children with VSCODE_* environment
+ * variables and /proc keeps a copy. macOS has no /proc, but a single `ps`
+ * snapshot gives the process tree, and a session whose ancestry runs through
+ * the VS Code app is a VS Code session. Native Windows has neither cheap
+ * answer, so its sessions stay unmarked -- the focus falls back to a terminal
+ * there, exactly as it always has.
+ */
+async function findVscodePids(agents, { platform }) {
+  const pids = agents.map((agent) => agent?.pid).filter((pid) => Number.isInteger(pid));
+  if (pids.length === 0) return [];
+
+  if (platform === 'linux') {
+    const marked = [];
+    for (const pid of pids) {
+      try {
+        const environ = await readFile(`/proc/${pid}/environ`, 'utf8');
+        if (environ.split('\0').some((entry) => entry.startsWith('VSCODE_'))) marked.push(pid);
+      } catch {
+        // Gone already, or not ours to read: then it is not marked, not fatal.
+      }
+    }
+    return marked;
+  }
+
+  if (platform === 'darwin') {
+    const table = await new Promise((resolve) => {
+      let child;
+      try {
+        child = spawn('ps', ['-axww', '-o', 'pid=,ppid=,command='], {
+          stdio: ['ignore', 'pipe', 'ignore'],
+        });
+      } catch {
+        resolve('');
+        return;
+      }
+      const out = [];
+      child.stdout.on('data', (chunk) => out.push(chunk));
+      child.on('error', () => resolve(''));
+      child.on('close', () => resolve(Buffer.concat(out).toString('utf8')));
+    });
+
+    const processes = new Map();
+    for (const line of table.split('\n')) {
+      const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+      if (match) processes.set(Number(match[1]), { ppid: Number(match[2]), command: match[3] });
+    }
+
+    const looksLikeVscode = (command) => /vscode|visual studio code|code helper/i.test(command);
+    return pids.filter((pid) => {
+      const seen = new Set();
+      for (let at = pid; processes.has(at) && !seen.has(at); ) {
+        seen.add(at);
+        const { ppid, command } = processes.get(at);
+        if (looksLikeVscode(command)) return true;
+        at = ppid;
+      }
+      return false;
+    });
+  }
+
+  return [];
+}
+
+/**
  * Every background job's state file.
  *
  * `claude agents --json` reports busy/idle but not *why* a background agent is
@@ -276,5 +343,11 @@ export async function probeNative(settings, log = () => {}, deps = {}) {
   const agents = await runAgents(binary, settings, resolved);
   if (!agents.ok) return agents;
 
-  return { ok: true, claude: binary, agents: agents.agents, jobs: await readJobs(resolved.home) };
+  return {
+    ok: true,
+    claude: binary,
+    agents: agents.agents,
+    jobs: await readJobs(resolved.home),
+    vscodePids: await findVscodePids(agents.agents, resolved),
+  };
 }

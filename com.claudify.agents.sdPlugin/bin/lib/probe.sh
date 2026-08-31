@@ -67,6 +67,20 @@ fi
 printf 'CLAUDIFY-META\n{"claude":%s}\n' "$(json_string "$CLAUDE")"
 printf 'CLAUDIFY-AGENTS\n%s\n' "$AGENTS"
 
+# Which of those sessions live inside VS Code? The extension host stamps its
+# children's environment with VSCODE_* variables, and /proc keeps a copy for
+# the life of the process -- so this needs no tool beyond the shell. The pid
+# scrape leans on `claude agents --json` printing plain integer pids; a pid
+# that fails the environ read (already gone, or not ours) is simply not listed.
+VSCODE_PIDS=''
+for pid in $(printf '%s\n' "$AGENTS" | grep -o '"pid"[ :]*[0-9]*' | grep -o '[0-9]*$'); do
+  [ -r "/proc/$pid/environ" ] || continue
+  if tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -q '^VSCODE_'; then
+    VSCODE_PIDS="$VSCODE_PIDS${VSCODE_PIDS:+,}$pid"
+  fi
+done
+printf 'CLAUDIFY-CLIENTS\n{"vscodePids":[%s]}\n' "$VSCODE_PIDS"
+
 # `claude agents --json` reports busy/idle but not *why* a background agent is
 # idle. The per-job state file carries that ("tempo":"blocked", "needs":"..."),
 # so ship it along and let the plugin join the two on sessionId.

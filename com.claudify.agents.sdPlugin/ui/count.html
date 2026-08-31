@@ -318,7 +318,8 @@
       <label for="pressAction">On press</label>
       <div class="control">
         <select id="pressAction">
-          <option value="focus">Bring the terminal to the front</option>
+          <option value="focus">Jump to the session that needs you</option>
+          <option value="focusVsCode">Jump to the VS Code session that needs you</option>
           <option value="agentView">Open a new agent view</option>
           <option value="refresh">Just refresh</option>
           <option value="custom">Run a command</option>
@@ -521,7 +522,8 @@
           const item = document.createElement('li');
           const name = document.createElement('span');
           name.className = 'name';
-          name.textContent = agent.name || agent.cwd || 'session';
+          name.textContent =
+            (agent.name || agent.cwd || 'session') + (agent.client === 'vscode' ? ' · VS Code' : '');
           name.title = agent.cwd || '';
           const state = document.createElement('span');
           state.className = 'state';
