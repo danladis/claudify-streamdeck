@@ -11,8 +11,9 @@
     "preview": "node scripts/preview.mjs",
     "raster": "node scripts/rasterize.mjs",
     "simulate": "node scripts/simulate.mjs",
+    "bump": "node scripts/version.mjs",
     "validate": "streamdeck validate com.claudify.agents.sdPlugin",
-    "pack": "streamdeck pack com.claudify.agents.sdPlugin --output build --force",
+    "pack": "streamdeck pack com.claudify.agents.sdPlugin --output build --force && node scripts/manifest-eol.mjs",
     "install-plugin": "bash scripts/install.sh",
     "dev-mode": "bash scripts/dev-mode.sh",
     "logs": "bash scripts/logs.sh"

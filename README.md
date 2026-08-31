@@ -31,15 +31,23 @@ change without notice.
 
 ## Install
 
-Requires the Stream Deck app already installed and running, and Node.
+Requires the Stream Deck app already installed and running.
+
+Download the latest
+**[com.claudify.agents.streamDeckPlugin](https://github.com/danladis/claudify-streamdeck/releases/latest)**
+and double-click it — the Stream Deck app takes it from there.
+
+Then drag any of **Claude Agents → Agent Count**, **Clawd**, **Usage Limits** or
+**Usage (one window)** onto a key.
+
+### From source
+
+Needs Node.
 
 ```sh
 npm run deps            # fetch the plugin's one runtime dependency (ws)
 npm run install-plugin  # copy the plugin into Stream Deck and reload it
 ```
-
-Then, in the Stream Deck app, drag any of **Claude Agents → Agent Count**,
-**Clawd**, **Usage Limits** or **Usage (one window)** onto a key.
 
 `install-plugin` reloads via Stream Deck's `streamdeck://` deep links, which
 need developer mode:
@@ -110,6 +118,18 @@ npm run preview         # render every key state to build/preview/index.html
 npm run validate        # Elgato's manifest linter
 npm run pack            # build a .streamDeckPlugin file
 ```
+
+### Releasing
+
+```sh
+npm run bump -- 1.1.0   # set the version in package.json and manifest.json
+git commit -am "release: v1.1.0" && git tag v1.1.0 && git push --follow-tags
+```
+
+Pushing a `v*` tag runs [`.github/workflows/release.yml`](.github/workflows/release.yml),
+which tests, validates and packs the plugin, then publishes a GitHub release with
+the `.streamDeckPlugin` attached. The tag has to match the version in the
+manifest, or the workflow stops.
 
 ## Credits
 
