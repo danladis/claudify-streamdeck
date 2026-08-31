@@ -1185,6 +1185,21 @@ test('a credentials path expands ~ but is otherwise taken as given', () => {
   assert.equal(resolveCredentialsPath('  ', '/home/x'), join('/home/x', '.claude', '.credentials.json'));
 });
 
+test('a credentials path pasted with quotes (Windows "Copy as path") is unwrapped', () => {
+  assert.equal(
+    resolveCredentialsPath('"\\\\wsl.localhost\\Ubuntu\\home\\x\\.claude\\.credentials.json"', '/home/x'),
+    resolveCredentialsPath('\\\\wsl.localhost\\Ubuntu\\home\\x\\.claude\\.credentials.json', '/home/x'),
+  );
+  assert.equal(
+    resolveCredentialsPath("'/home/x/creds.json'", '/home/x'),
+    resolveCredentialsPath('/home/x/creds.json', '/home/x'),
+  );
+  // Quotes around nothing mean nothing was named.
+  assert.equal(resolveCredentialsPath('""', '/home/x'), join('/home/x', '.claude', '.credentials.json'));
+  // A lone quote is not a wrapped path; leave it to fail loudly as-is.
+  assert.equal(resolveCredentialsPath('"', '/home/x'), resolve('"'));
+});
+
 /* --------------------------------------------------------- usage cache ---- */
 
 /** A clock the test drives by hand, so backoffs can be waited out instantly. */
