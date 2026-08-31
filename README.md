@@ -68,7 +68,11 @@ The agent keys take a refresh interval, what counts as an agent, which face and
 animation, what a press does, and how to reach Claude Code.
 
 A press, by default, jumps to the session that needs you: agents waiting on you
-come first, then the ones at work, then the idle. The count includes sessions
+come first, then the ones at work, then the idle. Pressing again moves on to
+the next session's window, wrapping around — the key notices when you are
+already looking at one of its sessions and cycles rather than repeating itself.
+(On macOS a press goes to the right application; cycling between individual
+windows is a Windows-side trick.) The count includes sessions
 running inside VS Code — they are the same `claude` processes — and the jump
 now knows the difference: a VS Code session is raised by its editor window
 (found by the project folder in the title), a terminal session by its tab
