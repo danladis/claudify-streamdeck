@@ -273,7 +273,7 @@ class AgentKey {
             event: 'status',
             ok: false,
             error: summary.error,
-            hint: errorHint(summary.error, summary.detail),
+            hint: errorHint(summary.error, summary.detail, resolveTransport(this.settings)),
             transport: resolveTransport(this.settings),
           },
     );

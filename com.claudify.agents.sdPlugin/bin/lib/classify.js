@@ -138,18 +138,43 @@ export function summarize(response, { scope = 'all' } = {}) {
 
 const ERROR_HINTS = {
   'claude-not-found':
-    'The claude binary was not found. Set an explicit path in "Claude binary" (for example /home/you/.local/bin/claude).',
+    'The claude binary was not found. Set an explicit path in "Claude binary".',
   'agents-command-failed': '`claude agents --json` exited non-zero. Try running it yourself in a shell.',
-  'host-unreachable': 'Could not start the shell. On Windows, check that WSL is installed and the distro name is right.',
-  'spawn-failed': 'Could not start the shell process.',
-  timeout: 'The host did not answer in time. A cold WSL distro can take a while on the first call.',
+  'host-unreachable': 'Could not reach the host Claude runs on.',
+  'spawn-failed': 'Could not start the process.',
+  timeout: '`claude agents --json` did not answer in time.',
   'bad-response': 'The probe returned something that was not JSON.',
   'empty-response': 'The probe returned nothing at all.',
   'wsl-asleep':
     'WSL is not running, so this poll skipped it rather than starting it back up. Press the key, or open the Property Inspector, for a real check.',
 };
 
-export function errorHint(error, detail) {
-  const hint = ERROR_HINTS[error] ?? 'Unexpected failure.';
+/**
+ * The same failure means something different depending on which host we were
+ * talking to: "could not start the shell" is a WSL problem worth naming as one,
+ * and useless advice on a machine with no WSL on it. Only the hints that
+ * actually change are listed; the rest fall through to ERROR_HINTS.
+ */
+const HINTS_BY_TRANSPORT = {
+  wsl: {
+    'claude-not-found':
+      'The claude binary was not found inside WSL. Set an explicit path in "Claude binary" (for example /home/you/.local/bin/claude).',
+    'host-unreachable':
+      'Could not start the shell. Check that WSL is installed and the distro name is right.',
+    timeout: 'The host did not answer in time. A cold WSL distro can take a while on the first call.',
+  },
+  local: {
+    'claude-not-found':
+      'The claude binary was not found on this machine. Set an explicit path in "Claude binary" -- on Windows that is usually %USERPROFILE%\\.local\\bin\\claude.exe.',
+  },
+};
+
+/**
+ * @param [transport] The resolved host, so the advice matches it. Omitting it
+ *   is safe: the wording just stays generic.
+ */
+export function errorHint(error, detail, transport) {
+  const hint =
+    HINTS_BY_TRANSPORT[transport]?.[error] ?? ERROR_HINTS[error] ?? 'Unexpected failure.';
   return detail ? `${hint} (${detail})` : hint;
 }

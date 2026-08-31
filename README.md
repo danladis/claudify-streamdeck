@@ -25,7 +25,7 @@ change without notice.
 | Host | Status |
 | --- | --- |
 | WSL (Claude Code on Windows, via WSL) | ✅ Supported |
-| Windows (Claude Code installed natively, no WSL) | ❔ Not yet — the probe assumes a POSIX shell, which native Windows doesn't have |
+| Windows (Claude Code installed natively, no WSL) | ✅ Supported — set **Where Claude runs → Host** to “This machine”; Auto still means WSL on Windows |
 | Linux (Claude Code installed natively) | ❔ Not yet — Stream Deck itself has no official Linux release |
 | macOS (Claude Code installed natively) | ✅ Supported |
 
@@ -65,8 +65,16 @@ Everything is a per-key setting in the Property Inspector (click the key in
 Stream Deck), and the defaults work if Claude Code is installed the usual way.
 
 The agent keys take a refresh interval, what counts as an agent, which face and
-animation, what a press does, and how to reach Claude Code (auto-detects WSL on
-Windows).
+animation, what a press does, and how to reach Claude Code.
+
+That last one is **Where Claude runs → Host**, and **Auto** means WSL on Windows
+— which is right for most people there, and stays the default so nobody's key
+changes hosts under them. If your Claude Code is installed on Windows itself,
+pick **This machine**: the plugin then runs `claude agents --json` directly
+instead of through `wsl.exe`, and a press opens Windows Terminal (or falls back
+to `cmd`) rather than a distro shell. A **custom command** is run by whichever
+host is selected, so it is a POSIX shell line under WSL and a `cmd` line on
+native Windows — the same key does not mean the same thing on both.
 
 When an agent finishes its work, Clawd blows a party horn and rains confetti for
 two and a half seconds, then goes back to whatever the key was showing. He hops

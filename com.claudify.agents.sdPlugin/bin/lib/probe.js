@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { probeNative } from './probe-native.js';
 import { resolveTransport } from './settings.js';
 import { decodeOutput, isWslVmAsleep } from './wsl.js';
 
@@ -61,19 +62,22 @@ export function parseSections(text) {
   return snapshot;
 }
 
+/**
+ * The script only crosses into WSL. Every other host is this machine, where the
+ * plugin can take the snapshot itself -- see probe-native.js.
+ */
 function commandFor(settings) {
-  if (resolveTransport(settings) === 'wsl') {
-    const args = settings.distro ? ['-d', settings.distro] : [];
-    // Feeding the script over stdin means no shell quoting has to survive the
-    // Windows -> WSL command line.
-    return { file: 'wsl.exe', args: [...args, '--', 'sh', '-s'] };
-  }
-  return { file: '/bin/sh', args: ['-s'] };
+  const args = settings.distro ? ['-d', settings.distro] : [];
+  // Feeding the script over stdin means no shell quoting has to survive the
+  // Windows -> WSL command line.
+  return { file: 'wsl.exe', args: [...args, '--', 'sh', '-s'] };
 }
 
-/** Run the snapshot script and return its parsed stdout. */
+/** Take the snapshot, however this host has to be reached. */
 async function runScript(settings, allowWake, log = () => {}) {
-  if (!allowWake && resolveTransport(settings) === 'wsl') {
+  if (resolveTransport(settings) !== 'wsl') return probeNative(settings, log);
+
+  if (!allowWake) {
     const asleep = await isWslVmAsleep(log);
     // Logged unconditionally, not just on the skip path, so the log proves
     // this check ran on every passive poll instead of only showing up when

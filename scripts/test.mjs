@@ -13,8 +13,12 @@ const LIB = join(
 );
 
 const { parseSections } = await import(join(LIB, 'probe.js'));
+const { probeNative } = await import(join(LIB, 'probe-native.js'));
+const { agentViewCommand, nativeWindowsStartScript, nativeWindowsTerminalArgs } = await import(
+  join(LIB, 'launch.js'),
+);
 const { isWslPath } = await import(join(LIB, 'wsl.js'));
-const { summarize } = await import(join(LIB, 'classify.js'));
+const { summarize, errorHint } = await import(join(LIB, 'classify.js'));
 const {
   viewFor,
   renderKey,
@@ -894,7 +898,59 @@ test('nothing meant to be seen is spawned with windowsHide', () => {
   // Windows Terminal then serves later `wt new-tab` calls from that hidden
   // instance, so every subsequent launch vanishes into it too.
   assert.match(launch, /hideWindow = true/, 'hidden is the default for silent work');
-  assert.match(launch, /firstThatStarts\(candidates, \{ hideWindow: false \}\)/, 'terminals are visible');
+  assert.match(
+    launch,
+    /firstThatStarts\([\s\S]{0,240}?\{ hideWindow: false \}/,
+    'terminals are visible',
+  );
+});
+
+test('on Windows itself, the window style says what is meant to be seen', () => {
+  // The spawn is always a hidden PowerShell; what the user sees or does not see
+  // is the style Start-Process gives the process it creates.
+  const terminal = nativeWindowsStartScript(nativeWindowsTerminalArgs('claude agents'), 'Normal');
+  assert.match(terminal, /-WindowStyle Normal/);
+  assert.doesNotMatch(terminal, /Hidden/);
+
+  const silent = nativeWindowsStartScript([['cmd.exe', '/s /c claude --bg x']], 'Hidden');
+  assert.match(silent, /-WindowStyle Hidden/);
+
+  // Success is judged by this line, not by PowerShell's exit code -- as in
+  // focus.ps1, and for the same reason.
+  assert.match(terminal, /Write-Output \('started: ' \+ \$attempt\.File\)/);
+  assert.match(terminal, /Write-Output \('failed: ' \+ \$problem\)/);
+});
+
+test('a native Windows command line is never wrapped in another quote pair', () => {
+  // cmd /s /c strips an outer pair and takes the rest verbatim, so leaving the
+  // command unwrapped is what keeps its own quotes and its && intact.
+  const command = 'cd /d "C:\\my repo" && "C:\\Users\\a b\\claude.exe" agents';
+  const [[wtFile, wtArgs], [cmdFile, cmdArgs]] = nativeWindowsTerminalArgs(command);
+
+  assert.equal(wtFile, 'wt.exe');
+  assert.equal(wtArgs, `new-tab --title "Claude agents" -- cmd.exe /s /c ${command}`);
+  assert.equal(cmdFile, 'cmd.exe');
+  assert.equal(cmdArgs, `/s /c ${command}`);
+
+  // Windows Terminal comes first, a bare console second.
+  assert.match(
+    nativeWindowsStartScript(nativeWindowsTerminalArgs(command), 'Normal'),
+    /wt\.exe[\s\S]*cmd\.exe/,
+  );
+
+  // A semicolon would start a second wt tab, so only that line escapes it --
+  // the bare cmd line must keep the character the user typed.
+  const semi = nativeWindowsTerminalArgs('a & echo b; echo c');
+  assert.ok(semi[0][1].endsWith('b\\; echo c'), semi[0][1]);
+  assert.ok(semi[1][1].endsWith('b; echo c'), semi[1][1]);
+});
+
+test("a single quote in a command survives PowerShell's own quoting", () => {
+  // The command is embedded in a single-quoted PowerShell string, so an
+  // apostrophe -- in a folder name, say -- has to be doubled, or the script
+  // stops parsing where the user's text begins.
+  const script = nativeWindowsStartScript([['cmd.exe', 'cd /d "C:\\Bob\'s Repo"']], 'Hidden');
+  assert.ok(script.includes(`Args = 'cd /d "C:\\Bob''s Repo"'`));
 });
 
 /* --------------------------------------------------------- usage bands ---- */
@@ -1602,4 +1658,240 @@ test('a countdown coarsens as it lengthens, and bottoms out at now', () => {
   assert.equal(formatCountdown(inMs(2 * 86400000 + 3 * 3600000), now), '2d 3h');
   assert.equal(formatCountdown(inMs(-1), now), 'now');
   assert.equal(formatCountdown(null, now), null);
+});
+
+/* ------------------------------------------------- the native probe ---- */
+
+/**
+ * A stand-in for the claude CLI: prints what it was told to on stdout, exits
+ * with the code it was told to, and records its own argv so the test can check
+ * what the probe actually asked for.
+ */
+async function fakeClaude(dir, { stdout = '[]', exitCode = 0, name = 'claude' } = {}) {
+  const path = join(dir, name);
+  await writeFile(
+    path,
+    ['#!/bin/sh', `printf '%s\\n' "$@" > "${join(dir, 'argv')}"`, `cat <<'EOF'`, stdout, 'EOF', `exit ${exitCode}`].join('\n'),
+    { mode: 0o755 },
+  );
+  return path;
+}
+
+/** A probe run that never touches the developer's own PATH or home directory. */
+const runNative = (settings, home, over = {}) =>
+  probeNative({ claudeBin: '', cwdFilter: '', ...settings }, () => {}, {
+    platform: 'linux',
+    home,
+    env: { PATH: '' },
+    ...over,
+  });
+
+test('the native probe reads agents and job files without a shell', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'claudify-native-'));
+  try {
+    const bin = await fakeClaude(dir, {
+      stdout: JSON.stringify([agent({ sessionId: 'a' }), agent({ sessionId: 'b', status: 'idle' })]),
+    });
+    await mkdir(join(dir, '.claude', 'jobs', 'one'), { recursive: true });
+    await writeFile(
+      join(dir, '.claude', 'jobs', 'one', 'state.json'),
+      JSON.stringify({ sessionId: 'b', tempo: 'blocked' }),
+    );
+
+    const snapshot = await runNative({ claudeBin: bin }, dir);
+    assert.equal(snapshot.ok, true);
+    assert.equal(snapshot.claude, bin);
+    assert.equal(snapshot.agents.length, 2);
+    assert.deepEqual(snapshot.jobs, [{ sessionId: 'b', tempo: 'blocked' }]);
+
+    // The whole point: the same summary the shell script's output produces.
+    const summary = summarize(snapshot);
+    assert.equal(summary.total, 2);
+    assert.equal(summary.blocked, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a job file caught mid-write costs only that job, natively too', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'claudify-native-'));
+  try {
+    const bin = await fakeClaude(dir, { stdout: JSON.stringify([agent()]) });
+    await mkdir(join(dir, '.claude', 'jobs', 'half'), { recursive: true });
+    await writeFile(join(dir, '.claude', 'jobs', 'half', 'state.json'), '{"sessionId":');
+    await mkdir(join(dir, '.claude', 'jobs', 'whole'), { recursive: true });
+    await writeFile(join(dir, '.claude', 'jobs', 'whole', 'state.json'), '{"sessionId":"s1"}');
+
+    const snapshot = await runNative({ claudeBin: bin }, dir);
+    assert.equal(snapshot.ok, true);
+    assert.deepEqual(snapshot.jobs, [{ sessionId: 's1' }]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the cwd filter reaches the CLI as --cwd', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'claudify-native-'));
+  try {
+    const bin = await fakeClaude(dir);
+    await runNative({ claudeBin: bin, cwdFilter: '/repo/with a space' }, dir);
+    const argv = readFileSync(join(dir, 'argv'), 'utf8').trim().split('\n');
+    assert.deepEqual(argv, ['agents', '--json', '--cwd', '/repo/with a space']);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('an explicit binary that is not there is an error, not a search', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'claudify-native-'));
+  try {
+    // A real claude sits in this very directory, and auto-detect would find it.
+    const real = await fakeClaude(dir);
+    const snapshot = await runNative({ claudeBin: join(dir, 'nope') }, dir, {
+      env: { PATH: dir },
+    });
+    assert.equal(snapshot.ok, false);
+    assert.equal(snapshot.error, 'claude-not-found');
+    assert.match(snapshot.detail, /nope/);
+    // Proof the fallback was available and deliberately not taken.
+    assert.equal((await runNative({}, dir, { env: { PATH: dir } })).claude, real);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('auto-detect walks PATH, then the standard install locations', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'claudify-native-'));
+  try {
+    await mkdir(join(dir, '.local', 'bin'), { recursive: true });
+    const installed = await fakeClaude(join(dir, '.local', 'bin'));
+
+    // Nothing on PATH: the home-directory candidate has to carry it.
+    assert.equal((await runNative({}, dir)).claude, installed);
+
+    // On PATH: that wins, as `command -v` does in the script.
+    const onPath = await fakeClaude(dir);
+    assert.equal((await runNative({}, dir, { env: { PATH: dir } })).claude, onPath);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('nothing installed anywhere says so', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'claudify-native-'));
+  try {
+    const snapshot = await runNative({}, dir);
+    assert.equal(snapshot.ok, false);
+    assert.equal(snapshot.error, 'claude-not-found');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a failing CLI reports the exit code, and junk output reports itself', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'claudify-native-'));
+  try {
+    const failing = await fakeClaude(dir, { stdout: '', exitCode: 3 });
+    const failed = await runNative({ claudeBin: failing }, dir);
+    assert.equal(failed.ok, false);
+    assert.equal(failed.error, 'agents-command-failed');
+    assert.equal(failed.exitCode, 3);
+    assert.equal(failed.claude, failing);
+
+    const junk = join(dir, 'junk');
+    await writeFile(junk, '#!/bin/sh\necho not json at all\n', { mode: 0o755 });
+    const bad = await runNative({ claudeBin: junk }, dir);
+    assert.equal(bad.ok, false);
+    assert.equal(bad.error, 'bad-response');
+    assert.match(bad.detail, /not json/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a Windows path typed without its extension is still meant', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'claudify-native-'));
+  try {
+    // Pretending to be Windows, where the extension decides which file is the
+    // program and stat is the only runnable check there is.
+    const exe = await fakeClaude(dir, { name: 'claude.exe' });
+    const snapshot = await runNative({ claudeBin: join(dir, 'claude') }, dir, {
+      platform: 'win32',
+    });
+    assert.equal(snapshot.ok, true);
+    assert.equal(snapshot.claude, exe);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('an .exe anywhere beats a .cmd anywhere, so no shell is needed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'claudify-native-'));
+  try {
+    await mkdir(join(dir, 'shim'), { recursive: true });
+    await mkdir(join(dir, 'real'), { recursive: true });
+    await fakeClaude(join(dir, 'shim'), { name: 'claude.cmd' });
+    const exe = await fakeClaude(join(dir, 'real'), { name: 'claude.exe' });
+
+    const snapshot = await runNative({}, dir, {
+      platform: 'win32',
+      // The .cmd's directory comes first on PATH and still loses: the search is
+      // extension-major precisely so a batch shim is the last resort.
+      env: { PATH: [join(dir, 'shim'), join(dir, 'real')].join(':') },
+    });
+    assert.equal(snapshot.claude, exe);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a batch shim goes through a shell with its arguments intact', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'claudify-native-'));
+  try {
+    // Only a .cmd to be had, so the probe has to build a command line rather
+    // than spawn the file. Running that line through this machine's own shell
+    // is not cmd.exe, but it does prove the line parses and that a path with a
+    // space in it survives being quoted into it.
+    const cmd = await fakeClaude(dir, { name: 'claude.cmd' });
+    const snapshot = await runNative({ claudeBin: cmd, cwdFilter: 'C:\\my repo' }, dir, {
+      platform: 'win32',
+    });
+    assert.equal(snapshot.ok, true);
+    assert.deepEqual(readFileSync(join(dir, 'argv'), 'utf8').trim().split('\n'), [
+      'agents',
+      '--json',
+      '--cwd',
+      'C:\\my repo',
+    ]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+/* ---------------------------------------------- host-shaped commands ---- */
+
+test('the agent view is written in the shell language of its host', () => {
+  const wsl = normalize({ transport: 'wsl', cwdFilter: "/repo/o'brien" });
+  assert.equal(
+    agentViewCommand(wsl, '/home/me/.local/bin/claude', 'win32'),
+    `cd '/repo/o'\\''brien' 2>/dev/null; '/home/me/.local/bin/claude' agents`,
+  );
+
+  const native = normalize({ transport: 'local', cwdFilter: 'C:\\Code\\my repo' });
+  assert.equal(
+    agentViewCommand(native, 'C:\\Users\\me\\.local\\bin\\claude.exe', 'win32'),
+    'cd /d "C:\\Code\\my repo" && "C:\\Users\\me\\.local\\bin\\claude.exe" agents',
+  );
+
+  // Same settings on a Mac are POSIX again: it is the host that decides.
+  assert.equal(agentViewCommand(normalize({ transport: 'local' }), 'claude', 'darwin'), `'claude' agents`);
+});
+
+test('error hints name the host they are about', () => {
+  assert.match(errorHint('host-unreachable', '', 'wsl'), /WSL is installed/);
+  assert.match(errorHint('claude-not-found', '', 'wsl'), /inside WSL/);
+  assert.match(errorHint('claude-not-found', '', 'local'), /on this machine/);
+  // An unknown or absent transport still says something useful.
+  assert.match(errorHint('claude-not-found', ''), /Claude binary/);
+  assert.match(errorHint('bad-response', 'oops', 'local'), /^The probe returned.*\(oops\)$/);
 });

@@ -1,9 +1,13 @@
 #!/bin/sh
 # Snapshot of every live Claude Code session on this machine, as one JSON blob.
 #
-# Fed to `sh -s` on stdin (directly, or through `wsl.exe`) so nothing has to be
-# installed on the Linux side and no shell quoting crosses the Windows boundary.
-# Placeholders are substituted by lib/probe.js before the script is piped in.
+# Fed to `sh -s` on stdin through `wsl.exe`, so nothing has to be installed on
+# the Linux side and no shell quoting crosses the Windows boundary. Placeholders
+# are substituted by lib/probe.js before the script is piped in.
+#
+# WSL is the only host that needs this. Everywhere else the plugin is already a
+# Node process on the machine Claude runs on and takes the same snapshot itself
+# -- see lib/probe-native.js, which must keep answering exactly as this does.
 
 CLAUDE_OVERRIDE='__CLAUDE_BIN__'
 CWD_FILTER='__CWD_FILTER__'
