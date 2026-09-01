@@ -297,9 +297,11 @@ class AgentKey {
     const { pressAction, customCommand } = this.settings;
     const names = this.#sessionNames();
 
-    if (pressAction === 'focus' || pressAction === 'focusVsCode') {
+    if (pressAction === 'focus' || pressAction === 'focusVsCode' || pressAction === 'focusCli') {
       const agents = this.summary?.ok ? this.summary.agents : [];
-      const targets = focusTargets(agents, pressAction === 'focusVsCode' ? { only: 'vscode' } : {});
+      const only =
+        pressAction === 'focusVsCode' ? 'vscode' : pressAction === 'focusCli' ? 'terminal' : undefined;
+      const targets = focusTargets(agents, { only });
       const result = await focusTerminal(this.settings, targets);
       if (!result.ok) {
         sd.showAlert(this.context);

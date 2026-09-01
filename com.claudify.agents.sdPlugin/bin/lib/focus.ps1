@@ -86,6 +86,22 @@ foreach ($t in $Targets) {
   }
 }
 
+# A terminal session whose name shows in no window title -- its tab is not the
+# active one, or the shell writes its own titles -- must still be reachable from
+# the ring, or a deck with both CLI and VS Code sessions would cycle through
+# the editors only. When some target expected a terminal but no terminal window
+# made the ring by name, the best terminal window joins it: one window, the
+# same one the final fallback would raise, not every shell on the desktop.
+$ringHasTerminal = @($candidates | Where-Object { $terminals -contains $_.Process }).Count -gt 0
+$wantsTerminal = ($Targets.Count -eq 0) -or
+  (@($Targets | Where-Object { -not $_.Process }).Count -gt 0)
+if ($wantsTerminal -and (-not $ringHasTerminal)) {
+  foreach ($terminal in $terminals) {
+    $best = $windows | Where-Object { $_.Process -eq $terminal } | Select-Object -First 1
+    if ($best) { [void]$candidates.Add($best); break }
+  }
+}
+
 # A press lands on the best candidate. A press while already *in* a candidate
 # moves to the one after it, wrapping -- so repeated presses cycle through the
 # sessions' windows, and the first press is never wasted on where you are.
@@ -101,20 +117,13 @@ if ($candidates.Count -gt 0) {
   }
 }
 
-# No name matched anything: a process-only target (any VS Code window), then a
-# terminal process, ranked by how likely it is to be the one in use.
+# Still nothing: a process-only target (the "any VS Code window" last resort).
+# The terminal equivalent needs no twin here -- a wanted terminal window
+# already joined the ring above.
 if (-not $target) {
   foreach ($t in $Targets) {
     if ($t.Title -or (-not $t.Process)) { continue }
     $target = $windows | Where-Object { $_.Process -like $t.Process } | Select-Object -First 1
-    if ($target) { break }
-  }
-}
-$wantsTerminal = ($Targets.Count -eq 0) -or
-  (@($Targets | Where-Object { -not $_.Process }).Count -gt 0)
-if ((-not $target) -and $wantsTerminal) {
-  foreach ($terminal in $terminals) {
-    $target = $windows | Where-Object { $_.Process -eq $terminal } | Select-Object -First 1
     if ($target) { break }
   }
 }

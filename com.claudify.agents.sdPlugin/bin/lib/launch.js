@@ -111,7 +111,9 @@ function unixTerminalCandidates(shellCommand) {
  *
  * @param [only] 'vscode' narrows to VS Code sessions -- the dedicated
  *   jump-to-VS-Code press -- and always keeps that last resort, so the press
- *   still lands in the editor when no session matches by title.
+ *   still lands in the editor when no session matches by title. 'terminal'
+ *   narrows to CLI sessions; its last resort -- any terminal window -- lives in
+ *   focus.ps1, which raises one whenever a terminal was wanted and none matched.
  */
 export function focusTargets(agents, { only } = {}) {
   const rank = { blocked: 0, working: 1, idle: 2 };

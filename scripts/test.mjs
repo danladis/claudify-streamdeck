@@ -214,6 +214,15 @@ test('focusTargets ranks who needs you and knows where each session lives', () =
     ],
     'terminal-only decks never reach for a Code window',
   );
+
+  assert.deepEqual(
+    focusTargets(agents, { only: 'terminal' }),
+    [
+      { title: 'churning', process: '' },
+      { title: 'idle-one', process: '' },
+    ],
+    'the dedicated CLI press ignores VS Code sessions, and its Code-window last resort with them',
+  );
 });
 
 test('busy counts as working, idle as idle', () => {

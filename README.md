@@ -76,10 +76,14 @@ windows is a Windows-side trick.) The count includes sessions
 running inside VS Code — they are the same `claude` processes — and the jump
 now knows the difference: a VS Code session is raised by its editor window
 (found by the project folder in the title), a terminal session by its tab
-title. Set **On press** to **Jump to the VS Code session that needs you** for a
-key that only ever goes to the editor — handy as a second key next to one that
-covers everything. On native Windows the probe cannot yet tell where a session
-lives, so every session counts as a terminal one there.
+title. A CLI session whose name shows in no window title — its tab is not the
+active one, or the shell writes its own titles — still gets one terminal window
+into the rotation, so a deck with both kinds never cycles through the editors
+only. Set **On press** to **Jump to the VS Code session that needs you** or
+**…the terminal session that needs you** for a key that only ever goes to one
+side — handy as a pair, one key per world, next to one that covers everything.
+On native Windows the probe cannot yet tell where a session lives, so every
+session counts as a terminal one there.
 
 That last one is **Where Claude runs → Host**, and **Auto** means WSL on Windows
 — which is right for most people there, and stays the default so nobody's key
