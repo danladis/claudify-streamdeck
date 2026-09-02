@@ -298,7 +298,22 @@ class AgentKey {
     const names = this.#sessionNames();
 
     if (pressAction === 'focus' || pressAction === 'focusVsCode' || pressAction === 'focusCli') {
-      const agents = this.summary?.ok ? this.summary.agents : [];
+      // Read the sessions again before jumping to one. The poll behind
+      // `this.summary` runs every `interval` seconds -- thirty by default --
+      // and which session needs you is exactly what changes in between. A
+      // press is a request, not a tick, so it is allowed to wake a sleeping
+      // WSL the way a timer is not.
+      //
+      // Acting on the stale reading is not merely a wrong order: focus.ps1
+      // cycles within the most urgent tier, so a session that became blocked
+      // since the last poll is not ranked low, it is not in the ring at all,
+      // and the press lands on whatever was busiest a moment ago.
+      const stale = this.summary;
+      await this.refresh();
+      // A probe that failed just now says nothing about where the sessions
+      // are; the last good reading is still the better guess.
+      const summary = this.summary?.ok ? this.summary : stale;
+      const agents = summary?.ok ? summary.agents : [];
       const only =
         pressAction === 'focusVsCode' ? 'vscode' : pressAction === 'focusCli' ? 'terminal' : undefined;
       const targets = focusTargets(agents, { only });

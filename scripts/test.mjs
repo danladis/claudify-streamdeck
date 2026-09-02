@@ -2201,3 +2201,36 @@ test('both probes accept the same session id shape, and it cannot be a path', ()
     assert.equal(accepts.test(hostile), false, `${hostile} is not a session id`);
   }
 });
+
+test('a focus press reads the sessions again before it jumps', () => {
+  // The poll behind the cached summary runs every `interval` seconds -- thirty
+  // by default. Which session needs you is exactly what changes in between,
+  // and focus.ps1 cycles within the most urgent tier: a session that blocked
+  // since the last poll is not ranked low, it is absent from the ring.
+  const plugin = readFileSync(
+    new URL('../com.claudify.agents.sdPlugin/bin/plugin.js', import.meta.url),
+    'utf8',
+  );
+  const branch = plugin.slice(
+    plugin.indexOf("if (pressAction === 'focus'"),
+    plugin.indexOf('const result = await focusTerminal'),
+  );
+  assert.ok(branch, 'the focus branch is still recognisable');
+
+  assert.match(branch, /await this\.refresh\(\)/, 'the press takes a fresh reading');
+  assert.ok(
+    branch.indexOf('await this.refresh()') < branch.indexOf('focusTargets'),
+    'and takes it before deciding where to go',
+  );
+  assert.match(
+    branch,
+    /this\.summary\?\.ok \? this\.summary : stale/,
+    'a probe that fails falls back to the last good reading rather than to nothing',
+  );
+});
+
+test('the poll interval is long enough that a stale press would be wrong', () => {
+  // If the default ever drops to something near-instant this stops mattering,
+  // and the extra probe on every press would be worth reconsidering.
+  assert.ok(normalize({}).interval >= 5, 'a press cannot assume a fresh summary');
+});
