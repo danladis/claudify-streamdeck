@@ -68,18 +68,32 @@ The agent keys take a refresh interval, what counts as an agent, which face and
 animation, what a press does, and how to reach Claude Code.
 
 A press, by default, jumps to the session that needs you: agents waiting on you
-come first, then the ones at work, then the idle. Pressing again moves on to
-the next session's window, wrapping around — the key notices when you are
-already looking at one of its sessions and cycles rather than repeating itself.
-(On macOS a press goes to the right application; cycling between individual
-windows is a Windows-side trick.) The count includes sessions
-running inside VS Code — they are the same `claude` processes — and the jump
-now knows the difference: a VS Code session is raised by its editor window
-(found by the project folder in the title), a terminal session by its tab
-title. A CLI session whose name shows in no window title — its tab is not the
-active one, or the shell writes its own titles — still gets one terminal window
-into the rotation, so a deck with both kinds never cycles through the editors
-only. Set **On press** to **Jump to the VS Code session that needs you** or
+come first, then the ones at work, then the idle. On Windows it goes to that
+session's own *tab*, not merely its window. A terminal hosting six sessions is
+a single window as far as Windows is concerned, and its title names only the
+tab in front — so a session sitting behind used to be unreachable, and the
+press raised the terminal on whatever tab happened to be open. Claude Code
+titles each tab after the task it is working on, and the key finds that tab
+through the same accessibility interface a screen reader uses, selects it, and
+then brings the window forward. A session too new to have been titled yet still
+gets its window raised, which is where this started.
+
+Pressing again moves to the next session that needs you — and stays among them.
+While anything is waiting on you, a press will not spend itself on a session
+that is merely busy. When only one session needs you, pressing again keeps you
+on it: that is the honest answer to "take me to whoever needs me". Once nothing
+is waiting, presses cycle through the rest.
+
+Every press takes its own reading of the sessions first rather than trusting
+the last poll, which can be a whole **Refresh** interval old — thirty seconds
+by default, and which session needs you is exactly what changes in between.
+
+(On macOS a press goes to the right application; picking out one window, or one
+tab inside it, is a Windows-side trick.) The count includes sessions running
+inside VS Code — they are the same `claude` processes — and the jump knows the
+difference: a VS Code session is raised by its editor window, found by the
+project folder in the title, while a terminal session is found by its tab.
+Set **On press** to **Jump to the VS Code session that needs you** or
 **…the terminal session that needs you** for a key that only ever goes to one
 side — handy as a pair, one key per world, next to one that covers everything.
 On native Windows the probe cannot yet tell where a session lives, so every
