@@ -92,6 +92,11 @@ export function summarize(response, { scope = 'all' } = {}) {
     if (job?.sessionId) jobsBySession.set(job.sessionId, job);
   }
 
+  // What each session's terminal tab is called, keyed by session id -- the only
+  // string that reliably finds a session's window *or* its tab. See
+  // probe-native's readTitles. Absent for a session too new to be titled.
+  const titles = response.titles && typeof response.titles === 'object' ? response.titles : {};
+
   // The probe names the pids that live inside VS Code; everything else is
   // assumed to sit in a terminal, which is also the safe reading on the hosts
   // where the probe cannot tell (see probe-native's findVscodePids).
@@ -124,6 +129,7 @@ export function summarize(response, { scope = 'all' } = {}) {
       ...agent,
       state,
       client: vscodePids.has(agent.pid) ? 'vscode' : 'terminal',
+      title: typeof titles[agent.sessionId] === 'string' ? titles[agent.sessionId] : '',
       needs: typeof job?.needs === 'string' ? job.needs.trim() : '',
     });
   }

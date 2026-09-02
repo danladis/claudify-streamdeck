@@ -14,8 +14,13 @@ const LIB = join(
 
 const { parseSections } = await import(join(LIB, 'probe.js'));
 const { probeNative } = await import(join(LIB, 'probe-native.js'));
-const { agentViewCommand, focusTargets, nativeWindowsStartScript, nativeWindowsTerminalArgs } =
-  await import(join(LIB, 'launch.js'));
+const {
+  agentViewCommand,
+  focusTargets,
+  nativeWindowsStartScript,
+  nativeWindowsTerminalArgs,
+  stripComments,
+} = await import(join(LIB, 'launch.js'));
 const { isWslPath } = await import(join(LIB, 'wsl.js'));
 const { summarize, errorHint } = await import(join(LIB, 'classify.js'));
 const {
@@ -184,33 +189,33 @@ test('focusTargets ranks who needs you and knows where each session lives', () =
 
   assert.deepEqual(focusTargets(agents), [
     // The blocked VS Code session first, found by its folder in a Code window.
-    { title: 'webapp', process: 'Code*' },
-    { title: 'churning', process: '' },
-    { title: 'idle-one', process: '' },
+    { title: 'webapp', process: 'Code*', tab: '', urgency: 0 },
+    { title: 'churning', process: '', tab: '', urgency: 1 },
+    { title: 'idle-one', process: '', tab: '', urgency: 2 },
     // Any VS Code window as the last resort, since a VS Code session is in play.
-    { title: '', process: 'Code*' },
+    { title: '', process: 'Code*', tab: '', urgency: 9 },
   ]);
 
   assert.deepEqual(
     focusTargets(agents, { only: 'vscode' }),
     [
-      { title: 'webapp', process: 'Code*' },
-      { title: '', process: 'Code*' },
+      { title: 'webapp', process: 'Code*', tab: '', urgency: 0 },
+      { title: '', process: 'Code*', tab: '', urgency: 9 },
     ],
     'the dedicated press ignores terminal sessions',
   );
 
   assert.deepEqual(
     focusTargets([agents[0]], { only: 'vscode' }),
-    [{ title: '', process: 'Code*' }],
+    [{ title: '', process: 'Code*', tab: '', urgency: 9 }],
     'no VS Code session still lands in the editor rather than nowhere',
   );
 
   assert.deepEqual(
     focusTargets([agents[0], agents[2]]),
     [
-      { title: 'churning', process: '' },
-      { title: 'idle-one', process: '' },
+      { title: 'churning', process: '', tab: '', urgency: 1 },
+      { title: 'idle-one', process: '', tab: '', urgency: 2 },
     ],
     'terminal-only decks never reach for a Code window',
   );
@@ -218,8 +223,8 @@ test('focusTargets ranks who needs you and knows where each session lives', () =
   assert.deepEqual(
     focusTargets(agents, { only: 'terminal' }),
     [
-      { title: 'churning', process: '' },
-      { title: 'idle-one', process: '' },
+      { title: 'churning', process: '', tab: '', urgency: 1 },
+      { title: 'idle-one', process: '', tab: '', urgency: 2 },
     ],
     'the dedicated CLI press ignores VS Code sessions, and its Code-window last resort with them',
   );
@@ -1990,4 +1995,209 @@ test('error hints name the host they are about', () => {
   // An unknown or absent transport still says something useful.
   assert.match(errorHint('claude-not-found', ''), /Claude binary/);
   assert.match(errorHint('bad-response', 'oops', 'local'), /^The probe returned.*\(oops\)$/);
+});
+
+test('a terminal target is found by its tab title, not the session name', () => {
+  // The two are different strings: Claude Code titles the tab after the task
+  // and names an interactive session after its cwd. Windows Terminal shows the
+  // active tab's title, so the tab title is what a window is matched on too.
+  const agents = [
+    {
+      name: 'claude-misc-2f',
+      title: 'Ask me a question',
+      cwd: '/home/d/claude-misc',
+      state: 'blocked',
+      client: 'terminal',
+    },
+  ];
+
+  assert.deepEqual(focusTargets(agents), [
+    { title: 'Ask me a question', process: '', tab: 'Ask me a question', urgency: 0 },
+  ]);
+});
+
+test('a session too new to be titled still falls back to its name', () => {
+  const agents = [{ name: 'fresh-a1', cwd: '/repo/fresh', state: 'idle', client: 'terminal' }];
+
+  assert.deepEqual(
+    focusTargets(agents),
+    [{ title: 'fresh-a1', process: '', tab: '', urgency: 2 }],
+    'no title means the old window-title match, and no tab to select',
+  );
+});
+
+test('a VS Code session names no tab -- it is found by its window', () => {
+  const agents = [
+    { name: 'x', title: 'Some task', cwd: '/home/x/webapp', state: 'idle', client: 'vscode' },
+  ];
+
+  const targets = focusTargets(agents);
+  assert.equal(targets[0].tab, '', 'an editor session is reached by window, not by tab');
+  assert.equal(targets[0].title, 'webapp');
+});
+
+test('classify carries each session tab title through from the probe', () => {
+  const summary = summarize({
+    ok: true,
+    agents: [
+      { pid: 1, sessionId: 's1', status: 'idle', kind: 'interactive' },
+      { pid: 2, sessionId: 's2', status: 'idle', kind: 'interactive' },
+    ],
+    jobs: [],
+    titles: { s1: 'Ask me a question', s2: 42 },
+  });
+
+  assert.equal(summary.agents[0].title, 'Ask me a question');
+  assert.equal(summary.agents[1].title, '', 'a title that is not a string is no title');
+
+  const none = summarize({ ok: true, agents: [{ pid: 1, sessionId: 's1', status: 'idle' }], jobs: [] });
+  assert.equal(none.agents[0].title, '', 'a probe that reports no titles at all is fine');
+});
+
+test('the TITLES section is parsed, and a bad one costs only itself', () => {
+  const snapshot = parseSections(
+    [
+      'CLAUDIFY-META',
+      '{"claude":"/usr/bin/claude"}',
+      'CLAUDIFY-AGENTS',
+      '[{"pid":1,"sessionId":"s1"}]',
+      'CLAUDIFY-TITLES',
+      '{"titles":{"s1":"Ask me a question","s2":"","s3":7}}',
+      'CLAUDIFY-END',
+      '',
+    ].join('\n'),
+  );
+
+  assert.deepEqual(snapshot.titles, { s1: 'Ask me a question' }, 'empty and non-string dropped');
+
+  const broken = parseSections(
+    ['CLAUDIFY-AGENTS', '[]', 'CLAUDIFY-TITLES', '{not json', 'CLAUDIFY-END', ''].join('\n'),
+  );
+  assert.equal(broken.ok, true, 'a malformed TITLES section is not fatal');
+  assert.deepEqual(broken.titles, {});
+});
+
+test('the focus script fits on a command line once its comments come off', () => {
+  // -EncodedCommand rides a ~32K command line and UTF-16LE-then-base64 costs
+  // eight bytes a character, so the comment-heavy source does not fit as-is.
+  const raw = readFileSync(join(LIB, 'focus.ps1'), 'utf8');
+  const encoded = (text) => Buffer.byteLength(text, 'utf16le') * (4 / 3);
+
+  assert.ok(
+    encoded(raw) > 32_000,
+    'if the raw script ever fits, this test has stopped proving anything',
+  );
+  assert.ok(
+    encoded(stripComments(raw)) < 32_000,
+    `stripped script must fit a command line, got ${Math.round(encoded(stripComments(raw)))}`,
+  );
+
+  const stripped = stripComments(raw);
+  assert.ok(stripped.includes('__TARGETS__'), 'the placeholder line is not a comment');
+  assert.ok(
+    stripped.includes('public static extern bool SetForegroundWindow'),
+    'the C# here-string survives intact',
+  );
+  assert.ok(!/^\s*#/m.test(stripped), 'no whole-line comment survives outside the here-string');
+});
+
+test('stripComments leaves anything that is not a whole-line comment alone', () => {
+  const script = [
+    '# a comment',
+    '$x = 1  # trailing text that only looks like one',
+    "$y = '# not a comment, a string'",
+    'Add-Type @\'',
+    '// C# here',
+    '',
+    '#define SOMETHING',
+    "'@",
+    '',
+    '  # indented comment',
+    '$z = 2',
+  ].join('\n');
+
+  assert.deepEqual(stripComments(script).split('\n'), [
+    '$x = 1  # trailing text that only looks like one',
+    "$y = '# not a comment, a string'",
+    "Add-Type @\'",
+    '// C# here',
+    // Blank lines and a leading # inside the here-string are part of the literal.
+    '',
+    '#define SOMETHING',
+    "'@",
+    '$z = 2',
+  ]);
+});
+
+test('urgency travels with each target so a press can stay in the top tier', () => {
+  const agents = [
+    { name: 'a', title: 'idles', cwd: '/r/a', state: 'idle', client: 'terminal' },
+    { name: 'b', title: 'needs you', cwd: '/r/b', state: 'blocked', client: 'terminal' },
+    { name: 'c', title: 'also needs you', cwd: '/r/c', state: 'blocked', client: 'terminal' },
+    { name: 'd', title: 'busy', cwd: '/r/d', state: 'working', client: 'terminal' },
+  ];
+
+  assert.deepEqual(
+    focusTargets(agents).map((t) => [t.tab, t.urgency]),
+    [
+      ['needs you', 0],
+      ['also needs you', 0],
+      ['busy', 1],
+      ['idles', 2],
+    ],
+    'both blocked sessions share the top tier, so a press can move between them',
+  );
+});
+
+test('a session title cannot break out of the script it is quoted into', () => {
+  // Titles are free-form model output, and `$&`, `$\'` and `` $` `` are special
+  // in a String.replaceAll *replacement* -- so a correctly quoted title can
+  // still be mangled on its way into the script, unbalancing the quotes.
+  const psQuote = (value) => `'${String(value ?? '').replace(/'/g, "''")}'`;
+  const title = "fix $' and $& and $` handling";
+  const list = `@(@{ Title = ${psQuote(title)}; Process = ''; Tab = ${psQuote(title)}; Urgency = 0 })`;
+
+  // The quoting itself is sound before anything substitutes it.
+  assert.equal((list.match(/'/g) ?? []).length % 2, 0, 'psQuote balances on its own');
+
+  const raw = stripComments(readFileSync(join(LIB, 'focus.ps1'), 'utf8'));
+  const viaString = raw.replaceAll('__TARGETS__', list);
+  const viaFunction = raw.replaceAll('__TARGETS__', () => list);
+
+  assert.notEqual(viaString, viaFunction, 'the two forms differ, which is the hazard');
+  assert.ok(viaFunction.includes(list), 'the function form inserts the targets verbatim');
+
+  const lineOf = (text) => text.split('\n').find((l) => l.startsWith('$Targets ='));
+  assert.equal(
+    (lineOf(viaFunction).match(/'/g) ?? []).length % 2,
+    0,
+    'quotes stay balanced through a function replacement',
+  );
+  assert.notEqual(
+    (lineOf(viaString).match(/'/g) ?? []).length % 2,
+    0,
+    'and a plain string replacement is what unbalances them',
+  );
+});
+
+test('both probes accept the same session id shape, and it cannot be a path', () => {
+  // A session id becomes a path segment in probe-native's findTranscript. The
+  // shell probe scrapes ids with an explicit charset; the two must agree, or
+  // the native side would follow an id the shell side would never produce.
+  const shell = readFileSync(join(LIB, 'probe.sh'), 'utf8');
+  const native = readFileSync(join(LIB, 'probe-native.js'), 'utf8');
+
+  const shellClass = shell.match(/grep -o '\[([^\]]+)\]\\\{(\d+)\\\}'/);
+  assert.ok(shellClass, 'probe.sh still scrapes ids with a bounded character class');
+  const nativePattern = native.match(/const SESSION_ID = \/\^\[([^\]]+)\]\{(\d+)\}\$\//);
+  assert.ok(nativePattern, 'probe-native still guards ids with a bounded pattern');
+
+  assert.equal(nativePattern[1], shellClass[1], 'same characters allowed on both sides');
+  assert.equal(nativePattern[2], shellClass[2], 'same length required on both sides');
+
+  const accepts = new RegExp(`^[${nativePattern[1]}]{${nativePattern[2]}}$`);
+  assert.equal(accepts.test('d394dc5b-f4be-4aed-8936-67bec712461a'), true, 'a real id passes');
+  for (const hostile of ['../../etc/hosts', '..', 'a/b', '.'.repeat(36), '../-r-x/secret']) {
+    assert.equal(accepts.test(hostile), false, `${hostile} is not a session id`);
+  }
 });
