@@ -18,9 +18,17 @@ function shellQuoteBody(value) {
 }
 
 function buildScript(settings) {
-  return SCRIPT.replace('__CLAUDE_BIN__', shellQuoteBody(settings.claudeBin)).replace(
+  // The replacements go in through functions on purpose. A string replacement
+  // gives `$&`, `$'` and friends their special meaning *in the replacement*,
+  // and both of these are free text from a key's settings -- which a shared
+  // Stream Deck profile carries with it. A `$'` splices the rest of the script
+  // back in, reopening the quoting shellQuoteBody had just closed and leaving
+  // the tail of the value running as commands inside WSL. Quoting the value
+  // correctly cannot help; it is String.replace undoing the quoting after the
+  // fact. A function replacement is taken literally.
+  return SCRIPT.replace('__CLAUDE_BIN__', () => shellQuoteBody(settings.claudeBin)).replace(
     '__CWD_FILTER__',
-    shellQuoteBody(settings.cwdFilter),
+    () => shellQuoteBody(settings.cwdFilter),
   );
 }
 

@@ -2234,3 +2234,38 @@ test('the poll interval is long enough that a stale press would be wrong', () =>
   // and the extra probe on every press would be worth reconsidering.
   assert.ok(normalize({}).interval >= 5, 'a press cannot assume a fresh summary');
 });
+
+test('a setting cannot break out of the shell script it is quoted into', () => {
+  // claudeBin and cwdFilter are free text from a key's settings, and a shared
+  // Stream Deck profile carries settings with it. `$&`, `$\'` and `` $` `` are
+  // special in a String.replace *replacement*: `$'` splices the rest of the
+  // script back in, reopening the quoting and leaving the tail as commands.
+  const script = readFileSync(join(LIB, 'probe.sh'), 'utf8');
+  const shellQuoteBody = (value) => String(value ?? '').replace(/'/g, `'\\''`);
+  const hostile = "x$';id > /tmp/pwned;:'";
+
+  const viaString = script.replace('__CLAUDE_BIN__', shellQuoteBody(hostile));
+  const viaFunction = script.replace('__CLAUDE_BIN__', () => shellQuoteBody(hostile));
+
+  assert.ok(
+    viaString.length > script.length + hostile.length * 2,
+    'the string form splices the script into itself, which is the hazard',
+  );
+  assert.ok(
+    viaFunction.length < script.length + hostile.length * 3,
+    'the function form only ever inserts the value',
+  );
+
+  const lineOf = (text) => text.split('\n').find((l) => l.startsWith('CLAUDE_OVERRIDE='));
+  assert.equal(
+    lineOf(viaFunction),
+    `CLAUDE_OVERRIDE='${shellQuoteBody(hostile)}'`,
+    'the value lands inside the quotes and nowhere else',
+  );
+
+  // And the shipped builder is the safe one.
+  const probe = readFileSync(join(LIB, 'probe.js'), 'utf8');
+  const builder = probe.slice(probe.indexOf('function buildScript'), probe.indexOf('parseSections'));
+  assert.match(builder, /__CLAUDE_BIN__', \(\) =>/, 'claudeBin goes in through a function');
+  assert.match(builder, /__CWD_FILTER__',\s*\(\) =>/, 'cwdFilter goes in through a function');
+});
