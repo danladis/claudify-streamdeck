@@ -1,28 +1,18 @@
-### What's new in v1.2.0
+### What's new in v1.2.1
 
-**A press now goes to the session's tab, not just its window.** A terminal
-hosting six Claude sessions is one window as far as Windows is concerned, and
-its title names only the tab in front — so a session waiting on you from a
-background tab was unreachable, and the key raised the terminal on whatever tab
-happened to be open. Claude Code titles each tab after the task it is working
-on, and the key now finds that tab through the same accessibility interface a
-screen reader uses, selects it, and then brings the window forward.
+**A security fix.** The **Claude binary** and **Folder** key settings are pasted
+into the small script the plugin runs inside WSL, and a value containing certain
+punctuation could escape the quotes around it and run as commands. Settings travel inside a shared Stream Deck profile, so importing
+someone else's profile was enough to be caught by this — it was not only a way
+to hurt yourself. Both values are now inserted literally and can no longer be
+anything but text.
 
-**And it stays with whoever needs you.** While any session is waiting on you,
-pressing again moves between those and only those — never onto one that is
-merely busy. When a single session needs you, pressing again keeps you on it.
-Once nothing is waiting, presses cycle through the rest.
+Present since v1.0.0. The same hazard in the jump-to-a-session code was fixed in
+v1.2.0; this is its twin, missed at the time.
 
-**Every press takes a fresh reading first.** The count behind a key is polled on
-the **Refresh** interval — thirty seconds by default — and which session needs
-you is exactly what changes in between. A press no longer acts on news that old.
-
-Also in this release: the jump knows whether a session lives in a terminal or in
-VS Code and raises the right one for it, and **Jump to the VS Code session that
-needs you** and **…the terminal session that needs you** arrive as separate
-**On press** options, for a key that only ever goes to one side. A path pasted
-into the usage keys' **File** setting with quotes still around it is also
-understood now, rather than being taken literally.
+Nothing else changed, and there is nothing you need to do differently. If you
+have never pasted anything unusual into those two boxes, and never imported a
+profile from someone else, you were never affected.
 
 ### Install
 
