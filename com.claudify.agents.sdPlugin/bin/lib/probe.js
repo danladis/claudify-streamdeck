@@ -35,7 +35,7 @@ export function parseSections(text) {
   const parts = text.split(/^CLAUDIFY-([A-Z]+)[ \t]*\r?$/m);
   if (parts.length < 3) return null;
 
-  const snapshot = { ok: true, claude: '', agents: [], jobs: [], vscodePids: [] };
+  const snapshot = { ok: true, claude: '', agents: [], jobs: [], vscodePids: [], titles: {} };
 
   for (let i = 1; i < parts.length; i += 2) {
     const section = parts[i];
@@ -61,6 +61,13 @@ export function parseSections(text) {
       snapshot.vscodePids = (Array.isArray(value?.vscodePids) ? value.vscodePids : []).filter(
         (pid) => Number.isInteger(pid),
       );
+    } else if (section === 'TITLES') {
+      // A title is only ever used to find a window or a tab, so anything that
+      // is not a non-empty string is worth nothing and is dropped here rather
+      // than checked again at every use.
+      for (const [sessionId, title] of Object.entries(value?.titles ?? {})) {
+        if (typeof title === 'string' && title) snapshot.titles[sessionId] = title;
+      }
     }
   }
 

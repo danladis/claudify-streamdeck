@@ -103,11 +103,17 @@ function unixTerminalCandidates(shellCommand) {
  *
  * A session that needs you outranks one at work, which outranks one idling.
  * Where the session lives decides what to look for: a terminal session is
- * found by its name (Claude Code puts it in the tab title), a VS Code session
- * by its project folder (VS Code puts that in the window title) among the
- * windows of a `Code*` process. When any VS Code session is in play, "any VS
- * Code window at all" is appended as the last resort -- a custom window title
- * must not strand the press.
+ * found by its tab title, a VS Code session by its project folder (VS Code
+ * puts that in the window title) among the windows of a `Code*` process. When
+ * any VS Code session is in play, "any VS Code window at all" is appended as
+ * the last resort -- a custom window title must not strand the press.
+ *
+ * The tab title does double duty for a terminal session, and the session name
+ * does neither job well. A tabbed terminal is one window whose title names the
+ * *active* tab, so the tab title is what matches the window; and `tab` carries
+ * it again for focus.ps1 to pick the one tab out of the many that window
+ * holds. The name is only a fallback, for a session too new to be titled: it
+ * is cwd-derived for interactive sessions and so matches nothing on screen.
  *
  * @param [only] 'vscode' narrows to VS Code sessions -- the dedicated
  *   jump-to-VS-Code press -- and always keeps that last resort, so the press
@@ -123,21 +129,29 @@ export function focusTargets(agents, { only } = {}) {
 
   const targets = [];
   for (const agent of ranked) {
+    const urgency = rank[agent.state] ?? 3;
     if (agent.client === 'vscode') {
       const folder = String(agent.cwd ?? '').split(/[\\/]/).filter(Boolean).pop() ?? '';
-      if (folder) targets.push({ title: folder, process: 'Code*' });
-    } else if (agent.name) {
-      targets.push({ title: agent.name, process: '' });
+      if (folder) targets.push({ title: folder, process: 'Code*', tab: '', urgency });
+    } else if (agent.title || agent.name) {
+      // The tab title beats the session name at *both* jobs. As a window
+      // title it is what a terminal actually displays -- Windows Terminal
+      // shows the active tab's title, which is the tab title and not the
+      // cwd-derived session name. And as `tab` it is the only string that
+      // picks one tab out of a window hosting several. The name stays as the
+      // fallback for a session too new to have been titled.
+      targets.push({ title: agent.title || agent.name, process: '', tab: agent.title ?? '', urgency });
     }
   }
   if (only === 'vscode' || ranked.some((agent) => agent.client === 'vscode')) {
-    targets.push({ title: '', process: 'Code*' });
+    targets.push({ title: '', process: 'Code*', tab: '', urgency: 9 });
   }
   return targets;
 }
 
 /** The targets equivalent of a plain list of session names. */
-const nameTargets = (names) => names.filter(Boolean).map((name) => ({ title: name, process: '' }));
+const nameTargets = (names) =>
+  names.filter(Boolean).map((name) => ({ title: name, process: '', tab: '', urgency: 0 }));
 
 /**
  * Open `shellCommand` in a visible terminal on whichever host runs Claude, then
@@ -294,6 +308,39 @@ function runNativeWindowsDetached(shellCommand) {
 const FOCUS_SCRIPT = readFileSync(join(HERE, 'focus.ps1'), 'utf8');
 
 /**
+ * -EncodedCommand rides on a command line, and Windows caps that near 32K.
+ * UTF-16LE then base64 costs eight bytes per source character, so the ceiling
+ * arrives at roughly 12KB of PowerShell -- which focus.ps1, written to explain
+ * itself the way everything here is, reaches on its own. Comments are for
+ * whoever reads the file, not for the shell, so they come off on the way out.
+ *
+ * Only whole-line comments go: a `#` mid-line may be inside a string, and no
+ * line is touched inside the here-string carrying the C# declarations, where a
+ * `#` would be C# and a blank line is still part of the literal.
+ */
+export function stripComments(script) {
+  let inHereString = false;
+  return script
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (inHereString) {
+        if (trimmed === "'@" || trimmed === '"@') inHereString = false;
+        return true;
+      }
+      if (/@['"]$/.test(trimmed)) {
+        inHereString = true;
+        return true;
+      }
+      return trimmed !== '' && !trimmed.startsWith('#');
+    })
+    .join('\n');
+}
+
+/** What a command line will take, less room for the rest of the invocation. */
+const MAX_ENCODED_BYTES = 32_000;
+
+/**
  * Bring the window a session is running in to the front, launching nothing.
  *
  * `targets` come from focusTargets: `{title, process}` pairs, best first. A
@@ -319,12 +366,33 @@ export function focusTerminal(settings, targets = []) {
 
   const list = targets.length
     ? `@(${targets
-        .map((target) => `@{ Title = ${psQuote(target.title)}; Process = ${psQuote(target.process)} }`)
+        .map(
+          (target) =>
+            `@{ Title = ${psQuote(target.title)}; Process = ${psQuote(target.process)}; Tab = ${psQuote(target.tab)}; Urgency = ${Number(target.urgency) || 0} }`,
+        )
         .join(', ')})`
     : '@()';
-  const script = FOCUS_SCRIPT.replaceAll('__TARGETS__', list);
+  // The replacement goes in through a function on purpose. A plain string
+  // replacement gives `$&`, `$'` and friends their special meaning *in the
+  // replacement*, and a session title is free text -- one containing `$'`
+  // would splice the rest of the script into the middle of a quoted string,
+  // unbalancing it and leaving script text outside the quotes. psQuote cannot
+  // help: by then the quoting is already correct and it is String.replaceAll
+  // undoing it. A function replacement is taken literally.
+  const script = stripComments(FOCUS_SCRIPT).replaceAll('__TARGETS__', () => list);
   if (script.includes('__TARGETS__')) {
     return Promise.resolve({ ok: false, detail: 'focus.ps1 placeholder was not substituted' });
+  }
+
+  // Over the line, powershell.exe answers "Invalid argument" and nothing says
+  // why. Enough sessions with long enough titles could get there, so say it
+  // plainly instead -- the targets are the only part that grows with use.
+  const encodedBytes = Buffer.byteLength(script, 'utf16le') * (4 / 3);
+  if (encodedBytes > MAX_ENCODED_BYTES) {
+    return Promise.resolve({
+      ok: false,
+      detail: `focus script is too long for a command line (${Math.round(encodedBytes)} bytes)`,
+    });
   }
 
   return runPowerShell(script, 'raised');

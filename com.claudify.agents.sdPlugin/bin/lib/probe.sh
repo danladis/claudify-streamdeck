@@ -81,6 +81,34 @@ for pid in $(printf '%s\n' "$AGENTS" | grep -o '"pid"[ :]*[0-9]*' | grep -o '[0-
 done
 printf 'CLAUDIFY-CLIENTS\n{"vscodePids":[%s]}\n' "$VSCODE_PIDS"
 
+# What each session's terminal tab is called. Claude Code titles the tab after
+# the task and writes that same string into the session transcript as
+# `aiTitle`, so the transcript is the only place a session id can be turned
+# back into the title its tab is showing -- the session `name` is a different
+# string entirely (cwd-derived for interactive sessions), and a window title
+# only ever reflects the *active* tab. Without this a press can raise the right
+# window and still leave you looking at the wrong tab.
+#
+# Read from the tail: the field is rewritten whenever the title changes and the
+# transcript grows without bound, so the last occurrence is the current title.
+# The value keeps its JSON escaping, which is exactly what re-emitting it
+# inside quotes needs. A session too new to have been titled yet simply has no
+# entry, and the plugin falls back to matching on window title alone.
+TITLES=''
+for sid in $(printf '%s\n' "$AGENTS" | grep -o '"sessionId"[ :]*"[0-9a-fA-F-]*"' | grep -o '[0-9a-fA-F-]\{36\}'); do
+  for transcript in "$HOME"/.claude/projects/*/"$sid".jsonl; do
+    [ -f "$transcript" ] || continue
+    title="$(tail -c 65536 "$transcript" \
+      | grep -o '"aiTitle"[ :]*"\([^"\\]\|\\.\)*"' \
+      | tail -1 \
+      | sed -e 's/^"aiTitle"[ :]*"//' -e 's/"$//')"
+    [ -n "$title" ] || continue
+    TITLES="$TITLES${TITLES:+,}\"$sid\":\"$title\""
+    break
+  done
+done
+printf 'CLAUDIFY-TITLES\n{"titles":{%s}}\n' "$TITLES"
+
 # `claude agents --json` reports busy/idle but not *why* a background agent is
 # idle. The per-job state file carries that ("tempo":"blocked", "needs":"..."),
 # so ship it along and let the plugin join the two on sessionId.

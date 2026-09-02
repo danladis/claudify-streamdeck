@@ -14,7 +14,7 @@
  */
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, readdir, readFile, stat } from 'node:fs/promises';
+import { access, open, readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, extname, join } from 'node:path';
 
@@ -285,6 +285,103 @@ async function findVscodePids(agents, { platform }) {
   return [];
 }
 
+/** The shape of a session id, matching what probe.sh's scrape accepts. */
+const SESSION_ID = /^[0-9a-fA-F-]{36}$/;
+
+/** How much of a transcript's tail is read looking for the current title. */
+const TITLE_TAIL_BYTES = 65_536;
+
+/** Every `aiTitle` in a chunk of transcript; the last one is the current one. */
+const TITLE_PATTERN = /"aiTitle"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+
+/**
+ * The path Claude Code keeps a session's transcript at.
+ *
+ * Project directories are the session's cwd with every separator turned into a
+ * dash, so the path is computable rather than searchable -- but only while that
+ * rule holds, so a miss falls back to looking through the project directories
+ * for the file named after the session.
+ */
+async function findTranscript(home, sessionId, cwd) {
+  // A session id becomes a path segment, so it has to look like one -- the
+  // shell probe only ever matches this shape and the two must agree. Anything
+  // else is refused rather than joined: `..` in an id would walk out of the
+  // projects directory and read whatever it landed on.
+  if (!SESSION_ID.test(String(sessionId ?? ''))) return '';
+
+  const projects = join(home, '.claude', 'projects');
+  const direct = join(projects, String(cwd ?? '').replaceAll('/', '-'), `${sessionId}.jsonl`);
+  try {
+    await access(direct, constants.R_OK);
+    return direct;
+  } catch {
+    // The encoding rule did not hold for this cwd; go looking.
+  }
+
+  let entries;
+  try {
+    entries = await readdir(projects);
+  } catch {
+    return '';
+  }
+  for (const entry of entries) {
+    const candidate = join(projects, entry, `${sessionId}.jsonl`);
+    try {
+      await access(candidate, constants.R_OK);
+      return candidate;
+    } catch {
+      // Not this project.
+    }
+  }
+  return '';
+}
+
+/**
+ * What each session's terminal tab is called, keyed by session id.
+ *
+ * Claude Code titles the tab after the task and records that same string in the
+ * transcript as `aiTitle`. Nothing else joins a session id to the title its tab
+ * is showing: the session `name` is a different string (cwd-derived for
+ * interactive sessions), and a window title only ever reflects the *active*
+ * tab -- so without this a press can raise the right window and still leave you
+ * on the wrong tab.
+ *
+ * Only the tail is read. The field is rewritten whenever the title changes and
+ * a transcript grows without bound, so the last occurrence is the current
+ * title and the first 64KB would be the stalest possible answer. A session too
+ * new to have been titled has no entry, and the caller falls back to matching
+ * on window title alone.
+ */
+async function readTitles(agents, home) {
+  const titles = {};
+  for (const agent of Array.isArray(agents) ? agents : []) {
+    if (!agent?.sessionId) continue;
+    const path = await findTranscript(home, agent.sessionId, agent.cwd);
+    if (!path) continue;
+
+    let handle;
+    try {
+      handle = await open(path, 'r');
+      const { size } = await handle.stat();
+      const length = Math.min(size, TITLE_TAIL_BYTES);
+      const buffer = Buffer.alloc(length);
+      await handle.read(buffer, 0, length, Math.max(0, size - length));
+
+      const found = [...buffer.toString('utf8').matchAll(TITLE_PATTERN)];
+      if (!found.length) continue;
+      // The capture is still JSON-escaped -- the same bytes that were in the
+      // file -- so let JSON undo it rather than guessing at the escapes.
+      const title = JSON.parse(`"${found[found.length - 1][1]}"`);
+      if (title) titles[agent.sessionId] = title;
+    } catch {
+      // Unreadable, mid-write, or not valid JSON after all: no title, no harm.
+    } finally {
+      await handle?.close().catch(() => {});
+    }
+  }
+  return titles;
+}
+
 /**
  * Every background job's state file.
  *
@@ -349,5 +446,6 @@ export async function probeNative(settings, log = () => {}, deps = {}) {
     agents: agents.agents,
     jobs: await readJobs(resolved.home),
     vscodePids: await findVscodePids(agents.agents, resolved),
+    titles: await readTitles(agents.agents, resolved.home),
   };
 }
