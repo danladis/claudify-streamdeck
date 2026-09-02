@@ -21,12 +21,23 @@ export const defaultCredentialsPath = (home = homedir()) =>
   join(home, '.claude', '.credentials.json');
 
 /**
+ * Windows' "Copy as path" wraps the path in double quotes, and people paste it
+ * that way; a shell habit does the same with single quotes. Take one matching
+ * pair off -- a lone or mismatched quote is left alone to fail loudly.
+ */
+function unquote(value) {
+  const quoted =
+    value.length >= 2 && (value[0] === '"' || value[0] === "'") && value.endsWith(value[0]);
+  return quoted ? value.slice(1, -1).trim() : value;
+}
+
+/**
  * Expand a user-supplied path, including a leading ~; blank means "the default".
  * `home` is a parameter rather than a call so a test can point it at a temp
  * directory and never read the developer's own account.
  */
 export function resolveCredentialsPath(customPath, home = homedir()) {
-  const trimmed = typeof customPath === 'string' ? customPath.trim() : '';
+  const trimmed = unquote(typeof customPath === 'string' ? customPath.trim() : '');
   if (!trimmed) return defaultCredentialsPath(home);
   if (trimmed === '~' || trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
     return join(home, trimmed.slice(1));
@@ -57,7 +68,8 @@ export function resolveCredentialsPath(customPath, home = homedir()) {
 export async function readCredentials(customPath, deps = {}) {
   const { platform = process.platform, readBlob = readKeychainBlob, home = homedir() } = deps;
   const filePath = resolveCredentialsPath(customPath, home);
-  const usingDefault = !(typeof customPath === 'string' && customPath.trim());
+  const usingDefault =
+    !(typeof customPath === 'string' && unquote(customPath.trim()));
 
   let contents;
   try {

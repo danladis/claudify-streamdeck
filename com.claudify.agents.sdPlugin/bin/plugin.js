@@ -6,7 +6,7 @@ import { ringFrames, spinFrameMs } from './lib/render.js';
 import { clawdFrames, clawdFrameMs, pickRandomMove } from './lib/clawd.js';
 import { FinishWatcher } from './lib/finished.js';
 import { partyFrames, PARTY_FRAME_MS, PARTY_MS } from './lib/party.js';
-import { agentViewCommand, focusTerminal, openInTerminal, runDetached } from './lib/launch.js';
+import { agentViewCommand, focusTargets, focusTerminal, openInTerminal, runDetached } from './lib/launch.js';
 import { barsFrames } from './lib/usage/bars.js';
 import { gaugeFrames } from './lib/usage/gauge.js';
 import { getUsage } from './lib/usage/provider.js';
@@ -266,6 +266,7 @@ class AgentKey {
               cwd: agent.cwd ?? '',
               kind: agent.kind ?? '',
               state: agent.state,
+              client: agent.client ?? 'terminal',
               needs: agent.needs ?? '',
             })),
           }
@@ -296,11 +297,15 @@ class AgentKey {
     const { pressAction, customCommand } = this.settings;
     const names = this.#sessionNames();
 
-    if (pressAction === 'focus') {
-      const result = await focusTerminal(this.settings, names);
+    if (pressAction === 'focus' || pressAction === 'focusVsCode' || pressAction === 'focusCli') {
+      const agents = this.summary?.ok ? this.summary.agents : [];
+      const only =
+        pressAction === 'focusVsCode' ? 'vscode' : pressAction === 'focusCli' ? 'terminal' : undefined;
+      const targets = focusTargets(agents, { only });
+      const result = await focusTerminal(this.settings, targets);
       if (!result.ok) {
         sd.showAlert(this.context);
-        sd.log(`[claude-agents] could not raise a terminal: ${result.detail}`);
+        sd.log(`[claude-agents] could not raise a window: ${result.detail}`);
       } else {
         sd.log(`[claude-agents] ${result.detail}`);
       }

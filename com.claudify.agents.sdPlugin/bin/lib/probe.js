@@ -35,7 +35,7 @@ export function parseSections(text) {
   const parts = text.split(/^CLAUDIFY-([A-Z]+)[ \t]*\r?$/m);
   if (parts.length < 3) return null;
 
-  const snapshot = { ok: true, claude: '', agents: [], jobs: [] };
+  const snapshot = { ok: true, claude: '', agents: [], jobs: [], vscodePids: [] };
 
   for (let i = 1; i < parts.length; i += 2) {
     const section = parts[i];
@@ -57,6 +57,11 @@ export function parseSections(text) {
     if (section === 'META') snapshot.claude = value.claude ?? '';
     else if (section === 'AGENTS') snapshot.agents = Array.isArray(value) ? value : [];
     else if (section === 'JOB') snapshot.jobs.push(value);
+    else if (section === 'CLIENTS') {
+      snapshot.vscodePids = (Array.isArray(value?.vscodePids) ? value.vscodePids : []).filter(
+        (pid) => Number.isInteger(pid),
+      );
+    }
   }
 
   return snapshot;

@@ -14,9 +14,8 @@ const LIB = join(
 
 const { parseSections } = await import(join(LIB, 'probe.js'));
 const { probeNative } = await import(join(LIB, 'probe-native.js'));
-const { agentViewCommand, nativeWindowsStartScript, nativeWindowsTerminalArgs } = await import(
-  join(LIB, 'launch.js'),
-);
+const { agentViewCommand, focusTargets, nativeWindowsStartScript, nativeWindowsTerminalArgs } =
+  await import(join(LIB, 'launch.js'));
 const { isWslPath } = await import(join(LIB, 'wsl.js'));
 const { summarize, errorHint } = await import(join(LIB, 'classify.js'));
 const {
@@ -142,7 +141,89 @@ test('parseSections tolerates CRLF from the Windows side', () => {
   assert.equal(snapshot.claude, '/c');
 });
 
+test('parseSections reads the CLIENTS section, and survives its absence', () => {
+  const withClients = parseSections(
+    [
+      'CLAUDIFY-AGENTS',
+      JSON.stringify([agent(), agent({ pid: 2, sessionId: 's2' })]),
+      'CLAUDIFY-CLIENTS',
+      '{"vscodePids":[2,"junk"]}',
+      'CLAUDIFY-END',
+    ].join('\n'),
+  );
+  assert.deepEqual(withClients.vscodePids, [2], 'integers only');
+
+  const without = parseSections('CLAUDIFY-AGENTS\n[]\nCLAUDIFY-END\n');
+  assert.deepEqual(without.vscodePids, [], 'an older script still parses');
+});
+
 /* ---------------------------------------------------------- classify ---- */
+
+test('the probe names the VS Code pids and summarize stamps each agent', () => {
+  const summary = summarize({
+    ok: true,
+    agents: [agent({ pid: 7 }), agent({ pid: 8, sessionId: 's2' })],
+    jobs: [],
+    vscodePids: [8],
+  });
+  assert.deepEqual(
+    summary.agents.map((a) => a.client),
+    ['terminal', 'vscode'],
+  );
+
+  const withoutSection = summarize({ ok: true, agents: [agent()], jobs: [] });
+  assert.equal(withoutSection.agents[0].client, 'terminal', 'unknown means terminal');
+});
+
+test('focusTargets ranks who needs you and knows where each session lives', () => {
+  const agents = [
+    { name: 'idle-one', cwd: '/repo/idle', state: 'idle', client: 'terminal' },
+    { name: 'editing', cwd: '/home/x/projects/webapp', state: 'blocked', client: 'vscode' },
+    { name: 'churning', cwd: '/repo/work', state: 'working', client: 'terminal' },
+  ];
+
+  assert.deepEqual(focusTargets(agents), [
+    // The blocked VS Code session first, found by its folder in a Code window.
+    { title: 'webapp', process: 'Code*' },
+    { title: 'churning', process: '' },
+    { title: 'idle-one', process: '' },
+    // Any VS Code window as the last resort, since a VS Code session is in play.
+    { title: '', process: 'Code*' },
+  ]);
+
+  assert.deepEqual(
+    focusTargets(agents, { only: 'vscode' }),
+    [
+      { title: 'webapp', process: 'Code*' },
+      { title: '', process: 'Code*' },
+    ],
+    'the dedicated press ignores terminal sessions',
+  );
+
+  assert.deepEqual(
+    focusTargets([agents[0]], { only: 'vscode' }),
+    [{ title: '', process: 'Code*' }],
+    'no VS Code session still lands in the editor rather than nowhere',
+  );
+
+  assert.deepEqual(
+    focusTargets([agents[0], agents[2]]),
+    [
+      { title: 'churning', process: '' },
+      { title: 'idle-one', process: '' },
+    ],
+    'terminal-only decks never reach for a Code window',
+  );
+
+  assert.deepEqual(
+    focusTargets(agents, { only: 'terminal' }),
+    [
+      { title: 'churning', process: '' },
+      { title: 'idle-one', process: '' },
+    ],
+    'the dedicated CLI press ignores VS Code sessions, and its Code-window last resort with them',
+  );
+});
 
 test('busy counts as working, idle as idle', () => {
   const summary = summarize({
@@ -878,9 +959,9 @@ test('focus.ps1 has exactly one substitution point, on the assignment', () => {
   // A second occurrence in a comment is what silently broke this once: the
   // non-global replace() patched the comment and left the assignment intact.
   const script = readFileSync(join(LIB, 'focus.ps1'), 'utf8');
-  const hits = script.match(/__NAMES__/g) ?? [];
+  const hits = script.match(/__TARGETS__/g) ?? [];
   assert.equal(hits.length, 1, `${hits.length} placeholders`);
-  assert.match(script, /^\$Names = __NAMES__$/m);
+  assert.match(script, /^\$Targets = __TARGETS__$/m);
 });
 
 test('focus.ps1 reports a verdict on every path', () => {
@@ -1183,6 +1264,21 @@ test('a credentials path expands ~ but is otherwise taken as given', () => {
   assert.equal(resolveCredentialsPath('', '/home/x'), join('/home/x', '.claude', '.credentials.json'));
   assert.equal(resolveCredentialsPath('~/creds.json', '/home/x'), join('/home/x', 'creds.json'));
   assert.equal(resolveCredentialsPath('  ', '/home/x'), join('/home/x', '.claude', '.credentials.json'));
+});
+
+test('a credentials path pasted with quotes (Windows "Copy as path") is unwrapped', () => {
+  assert.equal(
+    resolveCredentialsPath('"\\\\wsl.localhost\\Ubuntu\\home\\x\\.claude\\.credentials.json"', '/home/x'),
+    resolveCredentialsPath('\\\\wsl.localhost\\Ubuntu\\home\\x\\.claude\\.credentials.json', '/home/x'),
+  );
+  assert.equal(
+    resolveCredentialsPath("'/home/x/creds.json'", '/home/x'),
+    resolveCredentialsPath('/home/x/creds.json', '/home/x'),
+  );
+  // Quotes around nothing mean nothing was named.
+  assert.equal(resolveCredentialsPath('""', '/home/x'), join('/home/x', '.claude', '.credentials.json'));
+  // A lone quote is not a wrapped path; leave it to fail loudly as-is.
+  assert.equal(resolveCredentialsPath('"', '/home/x'), resolve('"'));
 });
 
 /* --------------------------------------------------------- usage cache ---- */

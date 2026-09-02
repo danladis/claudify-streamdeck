@@ -99,6 +99,47 @@ function unixTerminalCandidates(shellCommand) {
 }
 
 /**
+ * The windows worth raising for these sessions, best first.
+ *
+ * A session that needs you outranks one at work, which outranks one idling.
+ * Where the session lives decides what to look for: a terminal session is
+ * found by its name (Claude Code puts it in the tab title), a VS Code session
+ * by its project folder (VS Code puts that in the window title) among the
+ * windows of a `Code*` process. When any VS Code session is in play, "any VS
+ * Code window at all" is appended as the last resort -- a custom window title
+ * must not strand the press.
+ *
+ * @param [only] 'vscode' narrows to VS Code sessions -- the dedicated
+ *   jump-to-VS-Code press -- and always keeps that last resort, so the press
+ *   still lands in the editor when no session matches by title. 'terminal'
+ *   narrows to CLI sessions; its last resort -- any terminal window -- lives in
+ *   focus.ps1, which raises one whenever a terminal was wanted and none matched.
+ */
+export function focusTargets(agents, { only } = {}) {
+  const rank = { blocked: 0, working: 1, idle: 2 };
+  const ranked = (Array.isArray(agents) ? agents : [])
+    .filter((agent) => agent && (!only || agent.client === only))
+    .sort((a, b) => (rank[a.state] ?? 3) - (rank[b.state] ?? 3));
+
+  const targets = [];
+  for (const agent of ranked) {
+    if (agent.client === 'vscode') {
+      const folder = String(agent.cwd ?? '').split(/[\\/]/).filter(Boolean).pop() ?? '';
+      if (folder) targets.push({ title: folder, process: 'Code*' });
+    } else if (agent.name) {
+      targets.push({ title: agent.name, process: '' });
+    }
+  }
+  if (only === 'vscode' || ranked.some((agent) => agent.client === 'vscode')) {
+    targets.push({ title: '', process: 'Code*' });
+  }
+  return targets;
+}
+
+/** The targets equivalent of a plain list of session names. */
+const nameTargets = (names) => names.filter(Boolean).map((name) => ({ title: name, process: '' }));
+
+/**
  * Open `shellCommand` in a visible terminal on whichever host runs Claude, then
  * raise it -- `wt new-tab` attaches to an existing window without focusing it,
  * so without this the tab lands somewhere behind whatever you were doing.
@@ -118,7 +159,7 @@ export async function openInTerminal(settings, shellCommand, names = []) {
 
   // Give the terminal a moment to put its window up before reaching for it.
   await new Promise((done) => setTimeout(done, 1200));
-  await focusTerminal(settings, names);
+  await focusTerminal(settings, nameTargets(names));
   return result;
 }
 
@@ -253,17 +294,22 @@ function runNativeWindowsDetached(shellCommand) {
 const FOCUS_SCRIPT = readFileSync(join(HERE, 'focus.ps1'), 'utf8');
 
 /**
- * Bring the terminal a session is running in to the front, launching nothing.
+ * Bring the window a session is running in to the front, launching nothing.
  *
- * `names` are the live session names: Windows Terminal puts the active tab's
- * title in its window title and Claude Code names a session after its task, so
- * a name match usually finds the right window. Any terminal window is the
- * fallback.
+ * `targets` come from focusTargets: `{title, process}` pairs, best first. A
+ * title is matched as a substring of the window title -- Windows Terminal puts
+ * the active tab's title there and Claude Code names a session after its task;
+ * VS Code puts the project folder there. An empty title means any window of
+ * that process; an empty process means any process. Any terminal window is the
+ * fallback, unless every target named VS Code.
  */
-export function focusTerminal(settings, names = []) {
+export function focusTerminal(settings, targets = []) {
   if (!(WINDOWS_DESKTOP || resolveTransport(settings) === 'wsl')) {
     if (process.platform === 'darwin') {
-      return detach('osascript', ['-e', 'tell application "Terminal" to activate'], {
+      // No window titles to hunt through without a lot more AppleScript; go to
+      // the right application, which is what a single press most wants anyway.
+      const app = targets[0]?.process?.startsWith('Code') ? 'Visual Studio Code' : 'Terminal';
+      return detach('osascript', ['-e', `tell application "${app}" to activate`], {
         hideWindow: false,
       });
     }
@@ -271,9 +317,13 @@ export function focusTerminal(settings, names = []) {
     return Promise.resolve({ ok: false, detail: 'focusing is supported on Windows and macOS' });
   }
 
-  const list = names.length ? `@(${names.map(psQuote).join(', ')})` : '@()';
-  const script = FOCUS_SCRIPT.replaceAll('__NAMES__', list);
-  if (script.includes('__NAMES__')) {
+  const list = targets.length
+    ? `@(${targets
+        .map((target) => `@{ Title = ${psQuote(target.title)}; Process = ${psQuote(target.process)} }`)
+        .join(', ')})`
+    : '@()';
+  const script = FOCUS_SCRIPT.replaceAll('__TARGETS__', list);
+  if (script.includes('__TARGETS__')) {
     return Promise.resolve({ ok: false, detail: 'focus.ps1 placeholder was not substituted' });
   }
 

@@ -1,17 +1,24 @@
-# Raise the terminal window a Claude Code session is running in.
+# Raise the window a Claude Code session is running in.
 #
-# Windows Terminal puts the active tab's title in its window title, and Claude
-# Code names a session after its task -- so the session names from
-# `claude agents --json` are usually enough to find the right window. Any
-# leftover terminal window is the fallback.
+# Each target is @{ Title; Process }, best first -- see launch.js's
+# focusTargets. Windows Terminal puts the active tab's title in its window
+# title and Claude Code names a session after its task; VS Code puts the
+# project folder in its window title, so a folder name against a `Code*`
+# process finds the right editor window. An empty Title takes any window of
+# that process, once every named target has come up empty. Any terminal window
+# is the fallback -- unless every target named another process, because raising
+# some terminal when the press asked for VS Code helps nobody.
+#
+# A press from inside one of the matched windows moves to the next one,
+# wrapping around -- repeated presses cycle through the sessions' windows.
 #
 # The script is handed over as -EncodedCommand rather than run from a path, so it
 # behaves the same whether the plugin sits on the Windows filesystem or is being
 # driven from WSL during development. `-Command -` cannot be used: it chokes on
-# the here-string below. launch.js substitutes the names list.
+# the here-string below. launch.js substitutes the targets list.
 #
 # Prints exactly one line: "raised: <title>", "failed: <title>", or "none".
-$Names = __NAMES__
+$Targets = __TARGETS__
 
 Add-Type @'
 using System;
@@ -61,17 +68,62 @@ $callback = [Fg+EnumProc] {
 }
 [void][Fg]::EnumWindows($callback, [IntPtr]::Zero)
 
-# A session name in the title is the strongest signal; a terminal process is the
-# fallback, ranked by how likely it is to be the one in use.
-$target = $null
-foreach ($name in $Names) {
-  if (-not $name) { continue }
-  $target = $windows | Where-Object { $_.Title -like ('*' + $name + '*') } | Select-Object -First 1
-  if ($target) { break }
+# Every window a *named* target matches, in target order, each window once --
+# the ring that repeated presses walk. Process-only targets (the "any VS Code
+# window" last resort) stay out of it: they exist for the day a custom window
+# title hides every name, and letting them in would drag session-less editor
+# windows into the rotation.
+$candidates = New-Object System.Collections.ArrayList
+foreach ($t in $Targets) {
+  if (-not $t.Title) { continue }
+  foreach ($w in ($windows | Where-Object {
+    ($_.Title -like ('*' + $t.Title + '*')) -and
+    ((-not $t.Process) -or ($_.Process -like $t.Process))
+  })) {
+    if (-not ($candidates | Where-Object { $_.Handle -eq $w.Handle })) {
+      [void]$candidates.Add($w)
+    }
+  }
 }
-if (-not $target) {
+
+# A terminal session whose name shows in no window title -- its tab is not the
+# active one, or the shell writes its own titles -- must still be reachable from
+# the ring, or a deck with both CLI and VS Code sessions would cycle through
+# the editors only. When some target expected a terminal but no terminal window
+# made the ring by name, the best terminal window joins it: one window, the
+# same one the final fallback would raise, not every shell on the desktop.
+$ringHasTerminal = @($candidates | Where-Object { $terminals -contains $_.Process }).Count -gt 0
+$wantsTerminal = ($Targets.Count -eq 0) -or
+  (@($Targets | Where-Object { -not $_.Process }).Count -gt 0)
+if ($wantsTerminal -and (-not $ringHasTerminal)) {
   foreach ($terminal in $terminals) {
-    $target = $windows | Where-Object { $_.Process -eq $terminal } | Select-Object -First 1
+    $best = $windows | Where-Object { $_.Process -eq $terminal } | Select-Object -First 1
+    if ($best) { [void]$candidates.Add($best); break }
+  }
+}
+
+# A press lands on the best candidate. A press while already *in* a candidate
+# moves to the one after it, wrapping -- so repeated presses cycle through the
+# sessions' windows, and the first press is never wasted on where you are.
+$target = $null
+if ($candidates.Count -gt 0) {
+  $target = $candidates[0]
+  $front = [Fg]::GetForegroundWindow()
+  for ($i = 0; $i -lt $candidates.Count; $i++) {
+    if ($candidates[$i].Handle -eq $front) {
+      $target = $candidates[($i + 1) % $candidates.Count]
+      break
+    }
+  }
+}
+
+# Still nothing: a process-only target (the "any VS Code window" last resort).
+# The terminal equivalent needs no twin here -- a wanted terminal window
+# already joined the ring above.
+if (-not $target) {
+  foreach ($t in $Targets) {
+    if ($t.Title -or (-not $t.Process)) { continue }
+    $target = $windows | Where-Object { $_.Process -like $t.Process } | Select-Object -First 1
     if ($target) { break }
   }
 }
